@@ -1,0 +1,9 @@
+Package: voxl-mapper
+Version: 0.0.1
+Section: base
+Priority: optional
+Architecture: all
+Depends:
+Conflicts:
+Maintainer: matt.turi@modalai.com
+Description: voxl-mapper
