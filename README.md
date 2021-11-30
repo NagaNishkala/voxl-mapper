@@ -2,12 +2,6 @@
 
 3d Mapping and Path Planning
 
-**NOTE**
-To install all dependenices on VOXL, run this command:
-```
-yocto:/$ sudo opkg install libmodal_json openmp libvoxl_cutils ceres-solver nlopt voxl-mpa-tools libmodal_pipe voxblox
-```
-
 ## Build Instructions
 
 1. Start voxl-cross docker image
