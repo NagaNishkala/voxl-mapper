@@ -1,0 +1,21 @@
+ before_script:
+     - git clone -q --depth 1 https://gitlab.com/voxl-public/utilities/ci-tools
+
+ include:
+   - project: 'voxl-public/utilities/ci-tools'
+     file: '/pipeline-configs/.nightly-voxl-cross.yml'
+   - project: 'voxl-public/utilities/ci-tools'
+     file: '/pipeline-configs/.build-voxl-cross.yml'
+   - project: 'voxl-public/utilities/ci-tools'
+     file: '/pipeline-configs/.deploy-dev.yml'
+   - project: 'voxl-public/utilities/ci-tools'
+     file: '/pipeline-configs/.deploy-stable.yml'
+
+ variables:
+     GIT_SUBMODULE_STRATEGY: recursive
+
+ stages:
+     - nightly_build_stage
+     - build_stage
+     - deploy_stage_dev
+     - deploy_stage_stable
