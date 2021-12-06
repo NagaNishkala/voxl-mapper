@@ -58,6 +58,12 @@ voxl-vision-px4 must be setup to receive trajectories from voxl-mapper if you wo
 }
 ```
 
+Ideal startup process is as follows:
+1. Place the drone in takeoff location
+2. make sure voxl-vision-px4 is started correctly as explained above, and reset vio
+3. start voxl-mapper via ssh terminal
+4. take off, and start mapping -> can view live in voxl-portal as explained [here](##Viewing)
+
 ## Running
 
 voxl-mapper is a command line application and can be started on the command line:
