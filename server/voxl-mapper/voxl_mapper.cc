@@ -676,12 +676,12 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 	}
 	else if(strcmp(string, FOLLOW_PATH)==0){
         fprintf(stderr, "Client requested to follow last path\n");
-        server->followPath(TRAJ_CMD_FOLLOW);
+        server->followPath(TRAJ_CMD_LOAD_AND_START);
         return;
     }
     else if(strcmp(string, PLAN_STORE)==0){
         fprintf(stderr, "Client requested to store the current path\n");
-        server->followPath(TRAJ_CMD_STORE);
+        server->followPath(TRAJ_CMD_LOAD);
         return;
     }
     else if(strcmp(string, PLAN_ESTOP)==0){
@@ -710,7 +710,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         out.magic_number = TRAJECTORY_MAGIC_NUMBER;
         out.creation_time_ns = 0;
         out.n_segments = 0;
-        out.traj_command = TRAJ_CMD_FOLLOW;
+        out.traj_command = TRAJ_CMD_START;
         pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
         return;
     }

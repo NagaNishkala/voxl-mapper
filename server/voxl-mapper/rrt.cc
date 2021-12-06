@@ -64,9 +64,6 @@ RRTSTAR::RRTSTAR(Eigen::Vector3d start, Eigen::Vector3d end, std::shared_ptr<vox
     loco_smoother_.loco_config.w_c = loco_collision_cost_weight;
     loco_smoother_.loco_config.w_w = loco_waypoint_cost_weight;
 
-    loco_smoother_.setPoly(loco_poly_degree, loco_derivative_to_optimize);
-
-
     std::string benchmark_path = BENCHMARK_FILE;
     if (!exists_(benchmark_path)){
         std::ofstream outfile (benchmark_path);
@@ -443,7 +440,12 @@ bool RRTSTAR::locoSmooth(mav_msgs::EigenTrajectoryPointVector& coordinate_path, 
 {
     loco_smoother_.setResampleTrajectory(true);
     loco_smoother_.setAddWaypoints(false);
+
+    // turi -- test
+    loco_smoother_.setPoly(coordinate_path.size(), loco_derivative_to_optimize);
+
     bool got = loco_smoother_.getTrajectoryBetweenWaypoints(coordinate_path, last_trajectory_);
+
     bool success = false;
     if (got){
         mav_msgs::EigenTrajectoryPoint::Vector states;

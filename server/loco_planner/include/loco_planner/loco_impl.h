@@ -329,10 +329,11 @@ void Loco<N>::solveProblemCeres() {
   ceres::GradientProblem problem(new NestedCeresFunction(K_, num_free_, this));
 
   ceres::GradientProblemSolver::Options options;
-  options.line_search_direction_type = ceres::BFGS;
+  options.line_search_direction_type = ceres::LBFGS; // turi
   options.logging_type = ceres::SILENT;
   options.minimizer_progress_to_stdout = false;
-
+  options.use_approximate_eigenvalue_bfgs_scaling = true; // turi
+  options.max_solver_time_in_seconds = 1.5; // turi
   options.line_search_interpolation_type = ceres::BISECTION;
   ceres::GradientProblemSolver::Summary summary;
 

@@ -54,11 +54,12 @@
 #define TRAJ_MAX_SEGMENTS			20
 
 
-#define TRAJ_CMD_FOLLOW     0   //< immediately follow the current traj, OR if thats empty follow what we have stored (unless thats empty, then do nothin)
-#define TRAJ_CMD_STORE      1   //< store this trajectory, overwriting the current stored traj, do not follow yet
-#define TRAJ_CMD_APPEND     2   //< append this trajectory to the previous stored trajectory, do not follow yet
-#define TRAJ_CMD_PAUSE      3   //< if following a trajectory, pause and location hold till ob mode ends or a follow packet is received
-#define TRAJ_CMD_ESTOP      4   //< emergency halt. stop following, clear trajectory stored, and resets state
+#define TRAJ_CMD_LOAD_AND_START     0   //< load this trajectory, then immediately go into FOLLOWING_TRAJ state
+#define TRAJ_CMD_LOAD               1   //< load this trajectory, overwriting the current stored traj, then immediately go into PAUSED_TRAJ state
+#define TRAJ_CMD_APPEND             2   //< append this trajectory to the loaded trajectory, TODO
+#define TRAJ_CMD_PAUSE              3   //< regardless of current state, immediately go into PAUSED_TRAJ state
+#define TRAJ_CMD_START              4   //< if we have a loaded trajectory, immediately go into FOLLOWING_TRAJ state
+#define TRAJ_CMD_ESTOP              5   //< emergency halt. stop following, clear trajectory stored, and resets state
 
 
 // coefficients are INCREASING, e.g. x(t) = a + bt + ct^2 ...

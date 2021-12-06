@@ -9,7 +9,7 @@ namespace mav_planning {
 
 PolynomialSmoother::PolynomialSmoother()
     : PathSmootherBase(),
-      optimize_time_(true),
+      optimize_time_(false), // turi
       split_at_collisions_(true),
       min_col_check_resolution_(0.1) {}
 
