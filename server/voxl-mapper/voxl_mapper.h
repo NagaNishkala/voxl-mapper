@@ -24,7 +24,7 @@ public:
 
     // rrt planner
     bool maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, std::shared_ptr<EsdfMap> esdf_map_ptr, mav_trajectory_generation::Trajectory* path_to_follow);
-    bool followPath();
+    bool followPath(int flag);
 
     /// mpa callbacks
     static void _pc_connect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context);

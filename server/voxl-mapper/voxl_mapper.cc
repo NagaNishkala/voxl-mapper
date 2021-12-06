@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <unordered_map>
 #include <mav_local_planner/conversions.h>
+#include "obs_pc_filter.h"
 
 
 #define PROCESS_NAME "voxl-mapper"
@@ -51,8 +52,13 @@
 #define CLEAR_MAP       "clear_map"
 #define PLAN_TO         "plan_to"
 #define FOLLOW_PATH     "follow_path"
+#define PLAN_STORE      "store_path"
+#define PLAN_ESTOP      "stop_path"
+#define PLAN_PAUSE      "pause_path"
+#define PLAN_RESUME     "resume_path"
 
-#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH)
+
+#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH "," PLAN_ESTOP "," PLAN_STORE "," PLAN_PAUSE "," PLAN_RESUME)
 
 pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
 rc_tfv_ringbuf_t buf = RC_TF_RINGBUF_INITIALIZER;
@@ -119,15 +125,10 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
         fprintf(stderr, "skipped %d point clouds\n", n_packets - 1);
     }
 
-    // find new reduced point cloud size assuming we skip n points
-    int w_reduced = MPA_TOF_WIDTH/(point_skip + 1);
-    int h_reduced = MPA_TOF_HEIGHT/(point_skip + 1);
-    int pc_size_reduced = w_reduced * h_reduced;
-
     // grab the latest packet if we got more than 2 point clouds in 1 pipe read
     tof_data_t tof_data = data_array[n_packets - 1];
-
     int64_t curr_ts = tof_data.timestamp_ns;
+
     rc_tf_t tf_body_wrt_fixed = RC_TF_INITIALIZER;
     int ret = rc_tf_ringbuf_get_tf_at_time(&buf, curr_ts, &tf_body_wrt_fixed);
     if (ret < 0){
@@ -145,30 +146,11 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     }
 
     // setup our voxblox structs for pointcloud and colors
-    voxblox::Pointcloud ptcloud(pc_size_reduced);
-    voxblox::Colors _colors(pc_size_reduced);
+    voxblox::Pointcloud ptcloud;
+    voxblox::Colors _colors;
 
-    // populate the voxblox point cloud, skipping rows and cols
-    int n_points = 0;
-    for (int i = 0; i < MPA_TOF_HEIGHT; i += (point_skip + 1)){
-        for (int j = 0; j < MPA_TOF_WIDTH; j+= (point_skip + 1)){
-            int index = i * MPA_TOF_WIDTH + j;
-            if (n_points > pc_size_reduced - 1){
-                break;
-            }
-            if (tof_data.confidences[index] >= 100){
-                ptcloud[n_points].x() = tof_data.points[index][0];
-                ptcloud[n_points].y() = tof_data.points[index][1];
-                ptcloud[n_points].z() = tof_data.points[index][2];
-            }
-            else{
-                ptcloud[n_points].x() = 0.0;
-                ptcloud[n_points].y() = 0.0;
-                ptcloud[n_points].z() = 0.0;
-            }
-            n_points++;
-        }
-    }
+    obs_pc_downsample(MPA_TOF_SIZE, tof_data.points, tof_data.confidences, 4.0, 0.15, 4, &ptcloud);
+    _colors.resize(ptcloud.size());
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // now combine tfs
@@ -194,13 +176,13 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     point_cloud_metadata_t aligned_ptc_meta;
     aligned_ptc_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
     aligned_ptc_meta.timestamp_ns = server->rc_nanos_monotonic_time();
-    aligned_ptc_meta.n_points = pc_size_reduced;
+    aligned_ptc_meta.n_points = ptcloud.size();
     aligned_ptc_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
 
     pipe_server_write_point_cloud(ALIGNED_PTCLOUD_CH, aligned_ptc_meta, _pub_ptcloud.data());
 
 
-    for (int i=0; i<pc_size_reduced;  i++){
+    for (int i=0; i<ptcloud.size();  i++){
         float height = _pub_ptcloud[i].z();
 
         //floating point modulus
@@ -570,7 +552,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         server->planning = false;
 		return;
 	}
-	if(strcmp(string, RESET_VIO)==0){
+	else if(strcmp(string, RESET_VIO)==0){
 		printf("Client requested vio reset.\n");
         int fd = open(QVIO_SIMPLE_LOCATION "control", O_WRONLY);
         if(fd<0){
@@ -583,7 +565,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         close(fd);
 		return;
 	}
-	if(strncmp(string, SAVE_MAP, 8)==0){
+	else if(strncmp(string, SAVE_MAP, 8)==0){
 		printf("Client requested save map.\n");
         server->updateMesh();
 
@@ -616,7 +598,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         else server->saveMap(server->str_tsdf_save_path, server->str_esdf_save_path);
         return;
 	}
-	if(strncmp(string, LOAD_MAP, 8)==0){
+	else if(strncmp(string, LOAD_MAP, 8)==0){
 		printf("Client requested load map.\n");
 
         char* f_name;
@@ -648,12 +630,12 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         else server->loadMap(server->str_tsdf_save_path, server->str_esdf_save_path);
 		return;
 	}
-	if(strcmp(string, CLEAR_MAP)==0){
+	else if(strcmp(string, CLEAR_MAP)==0){
 		printf("Client requested clear map.\n");
 	    server->clear();
 		return;
 	}
-    if(strncmp(string, "plan_to", 7)==0){
+    else if(strncmp(string, "plan_to", 7)==0){
         server->planning = true;
 
 		printf("Client requested plan to location\n");
@@ -692,12 +674,46 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         server->planning = false;
 		return;
 	}
-	if(strcmp(string, FOLLOW_PATH)==0){
+	else if(strcmp(string, FOLLOW_PATH)==0){
         fprintf(stderr, "Client requested to follow last path\n");
-        server->followPath();
+        server->followPath(TRAJ_CMD_FOLLOW);
         return;
     }
-
+    else if(strcmp(string, PLAN_STORE)==0){
+        fprintf(stderr, "Client requested to store the current path\n");
+        server->followPath(TRAJ_CMD_STORE);
+        return;
+    }
+    else if(strcmp(string, PLAN_ESTOP)==0){
+        fprintf(stderr, "Client requested emergency stop!\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_ESTOP;
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        return;
+    }
+    else if(strcmp(string, PLAN_PAUSE)==0){
+        fprintf(stderr, "Client requested pause path follow\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_PAUSE;
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        return;
+    }
+    else if(strcmp(string, PLAN_RESUME)==0){
+        fprintf(stderr, "Client requested resume path follow\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_FOLLOW;
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        return;
+    }
 	printf("WARNING: Server received unknown command through the control pipe!\n");
 	printf("got %d bytes. Command is: %s\n", bytes, string);
 	return;
@@ -730,7 +746,7 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
         ptcloud_loco.push_back(pt);
     }
 
-    // TEMPORARY- sending format to specify type of path for voxl-portal
+    // *NOTE* using ts as format to specify type of path for voxl-portal
     // 0 - raw waypoints
     // 2 - loco smoothed path
     // 6 - rrt star tree as building (not sent here)
@@ -738,12 +754,13 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
     point_cloud_metadata_t waypoints_meta;
     waypoints_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
     waypoints_meta.n_points = raw_waypoints.size();
-    waypoints_meta.format = 0;
+    waypoints_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
+    waypoints_meta.timestamp_ns = 0;
 
     if (waypoints_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, waypoints_meta, raw_waypoints.data());
 
     waypoints_meta.n_points = ptcloud_loco.size();
-    waypoints_meta.format = 2;
+    waypoints_meta.timestamp_ns = 1;
     if (waypoints_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, waypoints_meta, ptcloud_loco.data());
 
     int ret = path_gen->reached();
@@ -753,7 +770,7 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
     return ret;
 }
 
-bool TsdfServer::followPath()
+bool TsdfServer::followPath(int flag)
 {
     mav_planning_msgs::PolynomialTrajectory4D msg;
 
@@ -771,6 +788,7 @@ bool TsdfServer::followPath()
     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
     out.creation_time_ns = rc_nanos_monotonic_time();
     out.n_segments = msg.segments.size();
+    out.traj_command = flag;
     if (en_debug) printf("num segs: %d\n", out.n_segments);
 
 

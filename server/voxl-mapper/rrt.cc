@@ -662,9 +662,9 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
         }
         if (rrt_send_tree){
             drawTreeLayer(root, &rrt_star_tree);
-            tree_meta.timestamp_ns = rc_nanos_monotonic_time();
+            tree_meta.timestamp_ns = 2; // from portal, TREE_FORMAT = 2;
             tree_meta.n_points = rrt_star_tree.size();
-            tree_meta.format = 6;     // 6 - rrt star tree format holder for voxl-portal
+            tree_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
             if (tree_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, tree_meta, rrt_star_tree.data());
             // necessary so websocket can handle data stream, should handle portal side eventually
             rrt_star_tree.clear();
