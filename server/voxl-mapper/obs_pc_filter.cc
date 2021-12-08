@@ -147,9 +147,6 @@ int obs_pc_downsample(int n, const float in[][3], const uint8_t* conf, float max
 	memset(map1, 0, nx*ny*nz);
 	int map2[nx][ny][nz];
 
-	int nx2 = (nx/2)+1;
-	int ny2 = (ny/2)+1;
-
 	// populate map1 with 1's and record the index in map2
 	// idea: could populate with higher numbers indicating higher confidence
 	// points or multiple points in that area
@@ -160,8 +157,8 @@ int obs_pc_downsample(int n, const float in[][3], const uint8_t* conf, float max
 		float z = valid_points[(i*3)+2];
 
 		// find index, add 1 due to the buffer box around the edge
-		int xidx = (int)(x/cell_size)+nx2;
-		int yidx = (int)(y/cell_size)+ny2;
+		int xidx = (int)((x-x_min)/cell_size)+1;
+		int yidx = (int)((y-x_min)/cell_size)+1;
 		int zidx = (((z-z_min)/cell_size)+1);
 
 		// This check isn't really necessary and hasn't tripped yet, but it's
