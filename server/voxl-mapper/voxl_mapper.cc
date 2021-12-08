@@ -782,6 +782,64 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
     return ret;
 }
 
+// TEST - checking along states, removing some of em too
+// void TsdfServer::estop_thread()
+// {
+//     int64_t start_time = rc_nanos_monotonic_time();
+//     mav_msgs::EigenTrajectoryPoint::Vector states;
+//     sampleWholeTrajectory(path_to_follow, 0.1, &states);
+
+//     std::vector<double> times = path_to_follow.getSegmentTimes();
+//     double duration = std::accumulate(times.begin(), times.end(), 0.0);
+
+//     duration *= 1000000000.0;
+
+//     double distance = 0.0;
+
+//     const double kCloseEnough = 0.1;  // meters.
+
+//     while(keep_checking && (rc_nanos_monotonic_time() - start_time < duration) && !states.empty()){
+
+//         rc_tf_t curr_tf = RC_TF_INITIALIZER;
+//         int ret = rc_tf_ringbuf_get_tf_at_time(&buf, rc_nanos_monotonic_time(), &curr_tf);
+//         if (ret < 0){
+//             fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
+//             continue;
+//         }
+
+//         Eigen::Vector3d curr_posit;
+//         curr_posit << curr_tf.d[0][3], curr_tf.d[1][3], curr_tf.d[2][3];
+
+//         for (int i = 0; i < states.size(); i++){
+//             if ((states[i].position_W - curr_posit).norm() >  kCloseEnough){
+//                 fprintf(stderr, "dropping states\n");
+//                 states.erase(states.begin());
+//             }
+//             else break;
+//         }
+
+//         for (int i = 0; i < states.size(); i++){
+//             if (esdf_map_->getDistanceAtPosition(states[i].position_W, true, &distance)) {
+//                 if (distance < robot_radius){
+//                     fprintf(stderr, "OBSTACLE IN PATH!!!\nDistance: %6.2f\n", distance);
+//                     fprintf(stderr, "Sending emergency stop!\n");
+//                     trajectory_t out;
+//                     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+//                     out.creation_time_ns = 0;
+//                     out.n_segments = 0;
+//                     out.traj_command = TRAJ_CMD_ESTOP;
+//                     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+//                     keep_checking = false;
+//                     break;
+//                 }
+//             }
+//         }
+//         usleep(150000);
+//     }
+//     keep_checking = false;
+//     return;
+// }
+
 void TsdfServer::estop_thread()
 {
     int64_t start_time = rc_nanos_monotonic_time();
@@ -793,35 +851,9 @@ void TsdfServer::estop_thread()
 
     duration *= 1000000000.0;
 
-    fprintf(stderr, "duration : %6.5f\n", duration);
-
     double distance = 0.0;
 
-    // const double kCloseEnough = 0.1;  // meters.
-
-    std::vector<point_xyz> raw_waypoints;
-
-    while(keep_checking && (rc_nanos_monotonic_time() - start_time < duration)){ //&& !states.empty()){
-        // fprintf(stderr, "loooop\n");
-        // pthread_mutex_lock(&pose_mutex);
-        // Eigen::Vector3d curr_posit =  curr_pose;
-        // pthread_mutex_unlock(&pose_mutex);
-
-        // for (int i = 0; i < states.size(); i++){
-            // if ((states[i].position_W - curr_posit).norm() >  kCloseEnough){
-                // fprintf(stderr, "dropping states\n");
-                // states.erase(states.begin());
-            // }
-            // else break;
-        // }
-
-        // TODO: better way to determine where along the trajectory we are
-        // sub to vvpx4 again in this thread (i.e. make it simply a callback)
-        // using simply that pose and a guesstemation of time? check states for closest, maybe 5 states beyond local min
-        // then drop those states and continue along the path
-        // states will be recalculated each time so that's okay
-        // not sure how this would translate to resumed trajectories, so for now just check em all
-
+    while(keep_checking && (rc_nanos_monotonic_time() - start_time < duration)){
         for (int i = 0; i < states.size(); i++){
             if (esdf_map_->getDistanceAtPosition(states[i].position_W, true, &distance)) {
                 if (distance < robot_radius){
