@@ -53,13 +53,13 @@ RRTSTAR::RRTSTAR(Eigen::Vector3d start, Eigen::Vector3d end, std::shared_ptr<vox
     loco_params.split_at_collisions_ = loco_split_at_collisions;
 
     loco_smoother_.setParameters(loco_params);
-    loco_smoother_.setMapDistanceCallback(std::bind(&RRTSTAR::getMapDistance, this, std::placeholders::_1));
+    // loco_smoother_.setMapDistanceCallback(std::bind(&RRTSTAR::getMapDistance, this, std::placeholders::_1));
     loco_smoother_.setInCollisionCallback(std::bind(&RRTSTAR::checkCollisionWithRobot, this, std::placeholders::_1));
     loco_smoother_.setDistanceAndGradientFunction(std::bind(&RRTSTAR::getMapDistanceAndGradient, this, std::placeholders::_1, std::placeholders::_2));
 
     loco_smoother_.loco_config.polynomial_degree = loco_poly_degree;
     loco_smoother_.loco_config.derivative_to_optimize = loco_derivative_to_optimize;
-    loco_smoother_.loco_config.robot_radius = robot_radius;
+    loco_smoother_.loco_config.robot_radius = (robot_radius*2.0);
     loco_smoother_.loco_config.w_d = loco_smoothness_cost_weight;
     loco_smoother_.loco_config.w_c = loco_collision_cost_weight;
     loco_smoother_.loco_config.w_w = loco_waypoint_cost_weight;
@@ -351,8 +351,9 @@ double RRTSTAR::getMapDistanceAndGradient(const Eigen::Vector3d& position, Eigen
 
 bool RRTSTAR::checkCollisionWithRobot(Eigen::Vector3d robot_position)
 {
+    static double radius__ = robot_radius * 1.75;
     float distance = getMapDistance(robot_position);
-    return robot_radius >= (double)distance;
+    return radius__ >= (double)distance;
 }
 
 bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end)
@@ -438,8 +439,8 @@ bool RRTSTAR::checkPathForCollisions(mav_msgs::EigenTrajectoryPointVector& path)
 
 bool RRTSTAR::locoSmooth(mav_msgs::EigenTrajectoryPointVector& coordinate_path, mav_msgs::EigenTrajectoryPointVector* path, mav_trajectory_generation::Trajectory* last_trajectory_)
 {
-    loco_smoother_.setResampleTrajectory(true);
-    loco_smoother_.setAddWaypoints(false);
+    // loco_smoother_.setResampleTrajectory(true);
+    // loco_smoother_.setAddWaypoints(false);
 
     // turi -- test
     loco_smoother_.setPoly(coordinate_path.size(), loco_derivative_to_optimize);

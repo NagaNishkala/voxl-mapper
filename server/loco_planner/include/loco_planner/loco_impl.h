@@ -333,8 +333,9 @@ void Loco<N>::solveProblemCeres() {
   options.logging_type = ceres::SILENT;
   options.minimizer_progress_to_stdout = false;
   options.use_approximate_eigenvalue_bfgs_scaling = true; // turi
-  options.max_solver_time_in_seconds = 1.5; // turi
-  options.line_search_interpolation_type = ceres::BISECTION;
+  options.max_solver_time_in_seconds = 2.0; // turi
+  options.function_tolerance = 0.001; // turi
+  options.line_search_interpolation_type = ceres::BISECTION; // CUBIC or QUADRATIC or BISECTION(default)
   ceres::GradientProblemSolver::Summary summary;
 
   // Fire up CERES!

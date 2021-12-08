@@ -9,7 +9,6 @@
 #include "mesh_vis.h"
 #include "rc_transform_ringbuf.h"
 
-
 namespace voxblox
 {
 
@@ -69,6 +68,10 @@ public:
     /// clears map
     virtual void clear();
 
+    /// follow helper thread
+    void estop_thread();
+
+
     // general public params
     bool en_debug;
     bool en_timing;
@@ -101,7 +104,10 @@ protected:
     Eigen::Vector3d start_pose;
     Eigen::Vector3d goal_pose;
 
+    // paths
     mav_trajectory_generation::Trajectory path_to_follow;
+    std::thread collision_check_thread;
+	std::atomic<bool> keep_checking;
 
     // costmap
     std::unordered_map<std::pair<double, double>, double, hash_pair> cost_map;

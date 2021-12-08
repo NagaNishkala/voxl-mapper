@@ -12,7 +12,7 @@ struct PhysicalConstraints {
       : v_max(1.0),
         a_max(2.0),
         yaw_rate_max(M_PI / 4.0),
-        robot_radius(0.20),
+        robot_radius(0.35), // turi
         sampling_dt(0.1) {}
 
   double v_max;  // Meters/second
