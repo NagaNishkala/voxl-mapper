@@ -788,23 +788,24 @@ void TsdfServer::estop_thread()
     mav_msgs::EigenTrajectoryPoint::Vector states;
     sampleWholeTrajectory(path_to_follow, 0.1, &states);
 
-    double duration = 0.0;
-    for(size_t i=0; i < traj.n_segments;i++){
-        duration += traj.segments[i].duration_s;
-    }
+    std::vector<double> times = path_to_follow.getSegmentTimes();
+    double duration = std::accumulate(times.begin(), times.end(), 0.0);
+
     duration *= 1000000000.0;
+
+    fprintf(stderr, "duration : %6.5f\n", duration);
 
     double distance = 0.0;
 
-    const double kCloseEnough = 0.1;  // meters.
+    // const double kCloseEnough = 0.1;  // meters.
 
     std::vector<point_xyz> raw_waypoints;
 
     while(keep_checking && (rc_nanos_monotonic_time() - start_time < duration)){ //&& !states.empty()){
         // fprintf(stderr, "loooop\n");
-        pthread_mutex_lock(&pose_mutex);
-        Eigen::Vector3d curr_posit =  curr_pose;
-        pthread_mutex_unlock(&pose_mutex);
+        // pthread_mutex_lock(&pose_mutex);
+        // Eigen::Vector3d curr_posit =  curr_pose;
+        // pthread_mutex_unlock(&pose_mutex);
 
         // for (int i = 0; i < states.size(); i++){
             // if ((states[i].position_W - curr_posit).norm() >  kCloseEnough){
