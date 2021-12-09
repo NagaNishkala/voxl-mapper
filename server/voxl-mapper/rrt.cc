@@ -414,6 +414,7 @@ bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end, std::pair<
     double path_length = distance(start, end);
 
     // int dist_val = path_length;
+    static const int max_jump = 0.75;
 
     for (double i = 0.1; i < path_length; i+=0.1){
         Eigen::Vector3d new_pt = start + (direction_vec * i);
@@ -426,6 +427,7 @@ bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end, std::pair<
                 i+=getMapDistance(new_pt);
             }
         }
+        if (i >= max_jump) return false;
     }
     return true;
 }

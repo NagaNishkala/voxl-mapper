@@ -232,7 +232,7 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
 
     // PHEW, finally, send in the point cloud to TSDF
     uint64_t start_time = server->rc_nanos_monotonic_time();
-    // server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
+    server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
     uint64_t end_time = server->rc_nanos_monotonic_time();
 
     if (server->en_timing){
