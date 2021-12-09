@@ -232,7 +232,7 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
 
     // PHEW, finally, send in the point cloud to TSDF
     uint64_t start_time = server->rc_nanos_monotonic_time();
-    server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
+    // server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
     uint64_t end_time = server->rc_nanos_monotonic_time();
 
     if (server->en_timing){
@@ -252,9 +252,9 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
             server->publish2DCostmap();
         }
     }
-    else if (server->keep_checking) server->updateEsdf(false);
+    // else if (server->keep_checking) server->updateEsdf(false);
 
-    if (!server->keep_checking){
+    // if (!server->keep_checking){
         // clear small sphere (0.2m radius) around our drones pose in the esdf map
         start_time = server->rc_nanos_monotonic_time();
         server->esdf_integrator_->addNewRobotPosition(Point(_curr_pose.x(), _curr_pose.y(), _curr_pose.z()));
@@ -262,7 +262,7 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
         if (server->en_timing){
             printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
         }
-    }
+    // }
     mesh_timer++;
     return;
 }
@@ -427,7 +427,7 @@ void TsdfServer::publish2DCostmap()
     pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
     float height = curr_pose.z();
     pthread_mutex_unlock(&pose_mutex); // return mutex lock
-    if (planning || keep_checking) return;
+    if (planning) return; //|| keep_checking) return;
 
     if (en_debug) printf("Generating CostMap\n");
     uint64_t start_time = rc_nanos_monotonic_time();
@@ -481,7 +481,7 @@ void TsdfServer::updateEsdf(bool clear_updated_flag)
 
 void TsdfServer::updateMesh()
 {
-    if (planning || keep_checking) return;
+    if (planning) return;// || keep_checking) return;
     if (en_debug) printf("Updating mesh\n");
 
     constexpr bool only_mesh_updated_blocks = true;
@@ -701,7 +701,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         out.n_segments = 0;
         out.traj_command = TRAJ_CMD_ESTOP;
         pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
-        server->keep_checking = false;
+        //server->keep_checking = false;
         return;
     }
     else if(strcmp(string, PLAN_PAUSE)==0){
@@ -712,7 +712,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         out.n_segments = 0;
         out.traj_command = TRAJ_CMD_PAUSE;
         pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
-        server->keep_checking = false;
+        //server->keep_checking = false;
         return;
     }
     else if(strcmp(string, PLAN_RESUME)==0){
@@ -723,7 +723,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         out.n_segments = 0;
         out.traj_command = TRAJ_CMD_START;
         pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
-        server->keep_checking = true;
+        //server->keep_checking = true;
         return;
     }
 	printf("WARNING: Server received unknown command through the control pipe!\n");
@@ -840,41 +840,41 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
 //     return;
 // }
 
-void TsdfServer::estop_thread()
-{
-    int64_t start_time = rc_nanos_monotonic_time();
-    mav_msgs::EigenTrajectoryPoint::Vector states;
-    sampleWholeTrajectory(path_to_follow, 0.1, &states);
+// void TsdfServer::estop_thread()
+// {
+//     int64_t start_time = rc_nanos_monotonic_time();
+//     mav_msgs::EigenTrajectoryPoint::Vector states;
+//     sampleWholeTrajectory(path_to_follow, 0.1, &states);
 
-    std::vector<double> times = path_to_follow.getSegmentTimes();
-    double duration = std::accumulate(times.begin(), times.end(), 0.0);
+//     std::vector<double> times = path_to_follow.getSegmentTimes();
+//     double duration = std::accumulate(times.begin(), times.end(), 0.0);
 
-    duration *= 1000000000.0;
+//     duration *= 1000000000.0;
 
-    double distance = 0.0;
+//     double distance = 0.0;
 
-    while(keep_checking && (rc_nanos_monotonic_time() - start_time < duration)){
-        for (int i = 0; i < states.size(); i++){
-            if (esdf_map_->getDistanceAtPosition(states[i].position_W, true, &distance)) {
-                if (distance < robot_radius){
-                    fprintf(stderr, "OBSTACLE IN PATH!!!\nDistance: %6.2f\n", distance);
-                    fprintf(stderr, "Sending emergency stop!\n");
-                    trajectory_t out;
-                    out.magic_number = TRAJECTORY_MAGIC_NUMBER;
-                    out.creation_time_ns = 0;
-                    out.n_segments = 0;
-                    out.traj_command = TRAJ_CMD_ESTOP;
-                    pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
-                    keep_checking = false;
-                    break;
-                }
-            }
-        }
-        usleep(150000);
-    }
-    keep_checking = false;
-    return;
-}
+//     while(keep_checking && (rc_nanos_monotonic_time() - start_time < duration)){
+//         for (int i = 0; i < states.size(); i++){
+//             if (esdf_map_->getDistanceAtPosition(states[i].position_W, true, &distance)) {
+//                 if (distance < robot_radius){
+//                     fprintf(stderr, "OBSTACLE IN PATH!!!\nDistance: %6.2f\n", distance);
+//                     fprintf(stderr, "Sending emergency stop!\n");
+//                     trajectory_t out;
+//                     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+//                     out.creation_time_ns = 0;
+//                     out.n_segments = 0;
+//                     out.traj_command = TRAJ_CMD_ESTOP;
+//                     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+//                     keep_checking = false;
+//                     break;
+//                 }
+//             }
+//         }
+//         usleep(150000);
+//     }
+//     keep_checking = false;
+//     return;
+// }
 
 bool TsdfServer::followPath(int flag)
 {
@@ -915,13 +915,13 @@ bool TsdfServer::followPath(int flag)
     }
     printf("sending trajectory to plan channel\n");
     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
-    if (flag == TRAJ_CMD_LOAD_AND_START){
-        if (collision_check_thread.joinable()){
-            collision_check_thread.join();
-        }
-        collision_check_thread = std::thread(&TsdfServer::estop_thread, this);
-        keep_checking = true;
-    }
+    // if (flag == TRAJ_CMD_LOAD_AND_START){
+        // if (collision_check_thread.joinable()){
+            // collision_check_thread.join();
+        // }
+        // collision_check_thread = std::thread(&TsdfServer::estop_thread, this);
+        // keep_checking = true;
+    // }
 
     return true;
 }
@@ -951,8 +951,11 @@ bool TsdfServer::loadMap(std::string tsdf_path, std::string esdf_path)
     if (esdf_loaded){
         printf("Successfully loaded ESDF layer.\n");
     }
-    planning = false;
     costmap_updates_only = false;
+    // updateEsdf(false);
+    usleep(250000);
+    planning = false;
+
     return (tsdf_loaded && esdf_loaded);
 }
 
