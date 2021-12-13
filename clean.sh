@@ -3,8 +3,6 @@
 # Modal AI Inc. 2019
 # author: james@modalai.com
 
-clear
-
 sudo rm -rf build/
 sudo rm -rf build32/
 sudo rm -rf build64/
