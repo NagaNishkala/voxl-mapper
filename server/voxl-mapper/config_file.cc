@@ -165,7 +165,7 @@ int config_file_read(void)
 	cJSON* parent = json_read_file(CONF_FILE);
 	if(parent==NULL) return -1;
 
-	json_fetch_double_with_default(parent, "robot_radius", &robot_radius, 0.2);
+	json_fetch_double_with_default(parent, "robot_radius", &robot_radius, 0.3);
 	json_fetch_float_with_default(parent, "voxel_size", &voxel_size, 0.2);
     json_fetch_int_with_default(parent, "voxels_per_side", &voxels_per_side, 16u);
 	json_fetch_string_with_default(parent, "esdf_save_path", esdf_save_path, BUF_LEN, "/data/voxl_mapper/esdf_map");
@@ -173,24 +173,24 @@ int config_file_read(void)
 	json_fetch_string_with_default(parent, "mesh_save_path", mesh_save_path, BUF_LEN, "/data/voxl_mapper/mesh.ply");
 
 	json_fetch_float_with_default(parent, "esdf_max_distance", &esdf_max_distance, 4.0);
-	json_fetch_float_with_default(parent, "esdf_min_distance", &esdf_min_distance, 0.2);
+	json_fetch_float_with_default(parent, "esdf_min_distance", &esdf_min_distance, 0.1);
 	json_fetch_float_with_default(parent, "esdf_default_distance", &esdf_default_distance, 2.0);
 	json_fetch_float_with_default(parent, "esdf_inner_sphere_radius", &esdf_inner_sphere_radius, 0.2);
 	json_fetch_float_with_default(parent, "esdf_outer_sphere_radius", &esdf_outer_sphere_radius, 0.6);
 
 	json_fetch_double_with_default(parent, "rrt_min_distance", &rrt_min_distance, 0.2);
-	json_fetch_double_with_default(parent, "rrt_max_runtime_nanoseconds", &rrt_max_runtime_nanoseconds, 2000000000);
-	json_fetch_bool_with_default(parent, "rrt_use_first_solution", (int*)&rrt_use_first_solution, 1);
+	json_fetch_double_with_default(parent, "rrt_max_runtime_nanoseconds", &rrt_max_runtime_nanoseconds, 1000000000);
+	json_fetch_bool_with_default(parent, "rrt_use_first_solution", (int*)&rrt_use_first_solution, 0);
 	json_fetch_bool_with_default(parent, "rrt_treat_unknown_as_occupied", (int*)&rrt_treat_unknown_as_occupied, 1);
 	json_fetch_bool_with_default(parent, "rrt_send_tree", (int*)&rrt_send_tree, 0);
 
-    json_fetch_int_with_default(parent, "loco_num_segments", &loco_num_segments, 8);
+    json_fetch_int_with_default(parent, "loco_num_segments", &loco_num_segments, 10);
     json_fetch_int_with_default(parent, "loco_derivative_to_optimize", &loco_derivative_to_optimize, 3);
-    json_fetch_int_with_default(parent, "loco_poly_degree", &loco_poly_degree, 8);
-	json_fetch_double_with_default(parent, "loco_smoothness_cost_weight", &loco_smoothness_cost_weight, 2.75);
-	json_fetch_double_with_default(parent, "loco_collision_cost_weight", &loco_collision_cost_weight, 10.0);
-	json_fetch_double_with_default(parent, "loco_waypoint_cost_weight", &loco_waypoint_cost_weight, 0.025);
-	json_fetch_double_with_default(parent, "loco_min_collision_sampling_dist", &loco_min_collision_sampling_dist, 0.1);
+    json_fetch_int_with_default(parent, "loco_poly_degree", &loco_poly_degree, 10);
+	json_fetch_double_with_default(parent, "loco_smoothness_cost_weight", &loco_smoothness_cost_weight, 2.5);
+	json_fetch_double_with_default(parent, "loco_collision_cost_weight", &loco_collision_cost_weight, 14.0);
+	json_fetch_double_with_default(parent, "loco_waypoint_cost_weight", &loco_waypoint_cost_weight, 0.0);
+	json_fetch_double_with_default(parent, "loco_min_collision_sampling_dist", &loco_min_collision_sampling_dist, 0.05);
 	json_fetch_bool_with_default(parent, "loco_add_waypoints", (int*)&loco_add_waypoints, 1);
 	json_fetch_bool_with_default(parent, "loco_scale_time", (int*)&loco_scale_time, 1);
 	json_fetch_bool_with_default(parent, "loco_split_at_collisions", (int*)&loco_split_at_collisions, 1);
