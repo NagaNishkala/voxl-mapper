@@ -45,7 +45,6 @@
 
 // *ALL DISTANCES/SIZES ARE IN METERS* //
 extern double robot_radius;
-extern int point_skip;
 extern float voxel_size;
 extern int voxels_per_side;
 extern char esdf_save_path[BUF_LEN];

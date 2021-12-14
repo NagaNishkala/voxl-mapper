@@ -1,14 +1,17 @@
 #include "voxl_mapper.h"
 #include "conversions.h"
-#include "trajectory_interface.h"
 #include "config_file.h"
 #include "mesh_vis.h"
 #include "ptcloud_vis.h"
 #include "rrt.h"
+#include "obs_pc_filter.h"
+#include "trajectory_interface.h"
 #include <unistd.h>
 #include <fcntl.h>
 #include <unordered_map>
 #include <mav_local_planner/conversions.h>
+#include <mav_trajectory_generation/trajectory_sampling.h>
+
 
 
 #define PROCESS_NAME "voxl-mapper"
@@ -51,8 +54,13 @@
 #define CLEAR_MAP       "clear_map"
 #define PLAN_TO         "plan_to"
 #define FOLLOW_PATH     "follow_path"
+#define PLAN_STORE      "store_path"
+#define PLAN_ESTOP      "stop_path"
+#define PLAN_PAUSE      "pause_path"
+#define PLAN_RESUME     "resume_path"
 
-#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH)
+
+#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH "," PLAN_ESTOP "," PLAN_STORE "," PLAN_PAUSE "," PLAN_RESUME)
 
 pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
 rc_tfv_ringbuf_t buf = RC_TF_RINGBUF_INITIALIZER;
@@ -77,6 +85,7 @@ TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::
     en_debug = debug;
     en_timing = timing;
     costmap_updates_only = false;
+    keep_checking = false;
 
     // callbacks MPA
     pipe_client_set_simple_helper_cb(MPA_POINT_CLOUD_CH, _pc_helper_cb, this);
@@ -119,15 +128,10 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
         fprintf(stderr, "skipped %d point clouds\n", n_packets - 1);
     }
 
-    // find new reduced point cloud size assuming we skip n points
-    int w_reduced = MPA_TOF_WIDTH/(point_skip + 1);
-    int h_reduced = MPA_TOF_HEIGHT/(point_skip + 1);
-    int pc_size_reduced = w_reduced * h_reduced;
-
     // grab the latest packet if we got more than 2 point clouds in 1 pipe read
     tof_data_t tof_data = data_array[n_packets - 1];
-
     int64_t curr_ts = tof_data.timestamp_ns;
+
     rc_tf_t tf_body_wrt_fixed = RC_TF_INITIALIZER;
     int ret = rc_tf_ringbuf_get_tf_at_time(&buf, curr_ts, &tf_body_wrt_fixed);
     if (ret < 0){
@@ -145,30 +149,11 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     }
 
     // setup our voxblox structs for pointcloud and colors
-    voxblox::Pointcloud ptcloud(pc_size_reduced);
-    voxblox::Colors _colors(pc_size_reduced);
+    voxblox::Pointcloud ptcloud;
+    voxblox::Colors _colors;
 
-    // populate the voxblox point cloud, skipping rows and cols
-    int n_points = 0;
-    for (int i = 0; i < MPA_TOF_HEIGHT; i += (point_skip + 1)){
-        for (int j = 0; j < MPA_TOF_WIDTH; j+= (point_skip + 1)){
-            int index = i * MPA_TOF_WIDTH + j;
-            if (n_points > pc_size_reduced - 1){
-                break;
-            }
-            if (tof_data.confidences[index] >= 100){
-                ptcloud[n_points].x() = tof_data.points[index][0];
-                ptcloud[n_points].y() = tof_data.points[index][1];
-                ptcloud[n_points].z() = tof_data.points[index][2];
-            }
-            else{
-                ptcloud[n_points].x() = 0.0;
-                ptcloud[n_points].y() = 0.0;
-                ptcloud[n_points].z() = 0.0;
-            }
-            n_points++;
-        }
-    }
+    obs_pc_downsample(MPA_TOF_SIZE, tof_data.points, tof_data.confidences, 4.0, 0.15, 4, &ptcloud);
+    _colors.resize(ptcloud.size());
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // now combine tfs
@@ -194,13 +179,16 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     point_cloud_metadata_t aligned_ptc_meta;
     aligned_ptc_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
     aligned_ptc_meta.timestamp_ns = server->rc_nanos_monotonic_time();
-    aligned_ptc_meta.n_points = pc_size_reduced;
+    aligned_ptc_meta.n_points = ptcloud.size();
     aligned_ptc_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
 
     pipe_server_write_point_cloud(ALIGNED_PTCLOUD_CH, aligned_ptc_meta, _pub_ptcloud.data());
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // pointcloud gradient coloring
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    for (int i=0; i<pc_size_reduced;  i++){
+    for (int i=0; i<ptcloud.size();  i++){
         float height = _pub_ptcloud[i].z();
 
         //floating point modulus
@@ -264,14 +252,17 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
             server->publish2DCostmap();
         }
     }
-    // clear small sphere (0.2m radius) around our drones pose in the esdf map
-    start_time = server->rc_nanos_monotonic_time();
-    server->esdf_integrator_->addNewRobotPosition(Point(_curr_pose.x(), _curr_pose.y(), _curr_pose.z()));
-    end_time = server->rc_nanos_monotonic_time();
-    if (server->en_timing){
-        printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
-    }
+    // else if (server->keep_checking) server->updateEsdf(false);
 
+    // if (!server->keep_checking){
+        // clear small sphere (0.2m radius) around our drones pose in the esdf map
+        start_time = server->rc_nanos_monotonic_time();
+        server->esdf_integrator_->addNewRobotPosition(Point(_curr_pose.x(), _curr_pose.y(), _curr_pose.z()));
+        end_time = server->rc_nanos_monotonic_time();
+        if (server->en_timing){
+            printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
+        }
+    // }
     mesh_timer++;
     return;
 }
@@ -436,7 +427,7 @@ void TsdfServer::publish2DCostmap()
     pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
     float height = curr_pose.z();
     pthread_mutex_unlock(&pose_mutex); // return mutex lock
-    if (planning) return;
+    if (planning) return; //|| keep_checking) return;
 
     if (en_debug) printf("Generating CostMap\n");
     uint64_t start_time = rc_nanos_monotonic_time();
@@ -490,7 +481,7 @@ void TsdfServer::updateEsdf(bool clear_updated_flag)
 
 void TsdfServer::updateMesh()
 {
-    if (planning) return;
+    if (planning) return;// || keep_checking) return;
     if (en_debug) printf("Updating mesh\n");
 
     constexpr bool only_mesh_updated_blocks = true;
@@ -570,7 +561,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         server->planning = false;
 		return;
 	}
-	if(strcmp(string, RESET_VIO)==0){
+	else if(strcmp(string, RESET_VIO)==0){
 		printf("Client requested vio reset.\n");
         int fd = open(QVIO_SIMPLE_LOCATION "control", O_WRONLY);
         if(fd<0){
@@ -583,7 +574,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         close(fd);
 		return;
 	}
-	if(strncmp(string, SAVE_MAP, 8)==0){
+	else if(strncmp(string, SAVE_MAP, 8)==0){
 		printf("Client requested save map.\n");
         server->updateMesh();
 
@@ -616,7 +607,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         else server->saveMap(server->str_tsdf_save_path, server->str_esdf_save_path);
         return;
 	}
-	if(strncmp(string, LOAD_MAP, 8)==0){
+	else if(strncmp(string, LOAD_MAP, 8)==0){
 		printf("Client requested load map.\n");
 
         char* f_name;
@@ -648,12 +639,12 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         else server->loadMap(server->str_tsdf_save_path, server->str_esdf_save_path);
 		return;
 	}
-	if(strcmp(string, CLEAR_MAP)==0){
+	else if(strcmp(string, CLEAR_MAP)==0){
 		printf("Client requested clear map.\n");
 	    server->clear();
 		return;
 	}
-    if(strncmp(string, "plan_to", 7)==0){
+    else if(strncmp(string, "plan_to", 7)==0){
         server->planning = true;
 
 		printf("Client requested plan to location\n");
@@ -692,12 +683,49 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         server->planning = false;
 		return;
 	}
-	if(strcmp(string, FOLLOW_PATH)==0){
+	else if(strcmp(string, FOLLOW_PATH)==0){
         fprintf(stderr, "Client requested to follow last path\n");
-        server->followPath();
+        server->followPath(TRAJ_CMD_LOAD_AND_START);
         return;
     }
-
+    else if(strcmp(string, PLAN_STORE)==0){
+        fprintf(stderr, "Client requested to store the current path\n");
+        server->followPath(TRAJ_CMD_LOAD);
+        return;
+    }
+    else if(strcmp(string, PLAN_ESTOP)==0){
+        fprintf(stderr, "Client requested emergency stop!\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_ESTOP;
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        //server->keep_checking = false;
+        return;
+    }
+    else if(strcmp(string, PLAN_PAUSE)==0){
+        fprintf(stderr, "Client requested pause path follow\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_PAUSE;
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        //server->keep_checking = false;
+        return;
+    }
+    else if(strcmp(string, PLAN_RESUME)==0){
+        fprintf(stderr, "Client requested resume path follow\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_START;
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        //server->keep_checking = true;
+        return;
+    }
 	printf("WARNING: Server received unknown command through the control pipe!\n");
 	printf("got %d bytes. Command is: %s\n", bytes, string);
 	return;
@@ -730,7 +758,7 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
         ptcloud_loco.push_back(pt);
     }
 
-    // TEMPORARY- sending format to specify type of path for voxl-portal
+    // *NOTE* using ts as format to specify type of path for voxl-portal
     // 0 - raw waypoints
     // 2 - loco smoothed path
     // 6 - rrt star tree as building (not sent here)
@@ -738,12 +766,13 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
     point_cloud_metadata_t waypoints_meta;
     waypoints_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
     waypoints_meta.n_points = raw_waypoints.size();
-    waypoints_meta.format = 0;
+    waypoints_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
+    waypoints_meta.timestamp_ns = 0;
 
     if (waypoints_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, waypoints_meta, raw_waypoints.data());
 
     waypoints_meta.n_points = ptcloud_loco.size();
-    waypoints_meta.format = 2;
+    waypoints_meta.timestamp_ns = 1;
     if (waypoints_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, waypoints_meta, ptcloud_loco.data());
 
     int ret = path_gen->reached();
@@ -753,7 +782,101 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
     return ret;
 }
 
-bool TsdfServer::followPath()
+// TEST - checking along states, removing some of em too
+// void TsdfServer::estop_thread()
+// {
+//     int64_t start_time = rc_nanos_monotonic_time();
+//     mav_msgs::EigenTrajectoryPoint::Vector states;
+//     sampleWholeTrajectory(path_to_follow, 0.1, &states);
+
+//     std::vector<double> times = path_to_follow.getSegmentTimes();
+//     double duration = std::accumulate(times.begin(), times.end(), 0.0);
+
+//     duration *= 1000000000.0;
+
+//     double distance = 0.0;
+
+//     const double kCloseEnough = 0.1;  // meters.
+
+//     while(keep_checking && (rc_nanos_monotonic_time() - start_time < duration) && !states.empty()){
+
+//         rc_tf_t curr_tf = RC_TF_INITIALIZER;
+//         int ret = rc_tf_ringbuf_get_tf_at_time(&buf, rc_nanos_monotonic_time(), &curr_tf);
+//         if (ret < 0){
+//             fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
+//             continue;
+//         }
+
+//         Eigen::Vector3d curr_posit;
+//         curr_posit << curr_tf.d[0][3], curr_tf.d[1][3], curr_tf.d[2][3];
+
+//         for (int i = 0; i < states.size(); i++){
+//             if ((states[i].position_W - curr_posit).norm() >  kCloseEnough){
+//                 fprintf(stderr, "dropping states\n");
+//                 states.erase(states.begin());
+//             }
+//             else break;
+//         }
+
+//         for (int i = 0; i < states.size(); i++){
+//             if (esdf_map_->getDistanceAtPosition(states[i].position_W, true, &distance)) {
+//                 if (distance < robot_radius){
+//                     fprintf(stderr, "OBSTACLE IN PATH!!!\nDistance: %6.2f\n", distance);
+//                     fprintf(stderr, "Sending emergency stop!\n");
+//                     trajectory_t out;
+//                     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+//                     out.creation_time_ns = 0;
+//                     out.n_segments = 0;
+//                     out.traj_command = TRAJ_CMD_ESTOP;
+//                     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+//                     keep_checking = false;
+//                     break;
+//                 }
+//             }
+//         }
+//         usleep(150000);
+//     }
+//     keep_checking = false;
+//     return;
+// }
+
+// void TsdfServer::estop_thread()
+// {
+//     int64_t start_time = rc_nanos_monotonic_time();
+//     mav_msgs::EigenTrajectoryPoint::Vector states;
+//     sampleWholeTrajectory(path_to_follow, 0.1, &states);
+
+//     std::vector<double> times = path_to_follow.getSegmentTimes();
+//     double duration = std::accumulate(times.begin(), times.end(), 0.0);
+
+//     duration *= 1000000000.0;
+
+//     double distance = 0.0;
+
+//     while(keep_checking && (rc_nanos_monotonic_time() - start_time < duration)){
+//         for (int i = 0; i < states.size(); i++){
+//             if (esdf_map_->getDistanceAtPosition(states[i].position_W, true, &distance)) {
+//                 if (distance < robot_radius){
+//                     fprintf(stderr, "OBSTACLE IN PATH!!!\nDistance: %6.2f\n", distance);
+//                     fprintf(stderr, "Sending emergency stop!\n");
+//                     trajectory_t out;
+//                     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+//                     out.creation_time_ns = 0;
+//                     out.n_segments = 0;
+//                     out.traj_command = TRAJ_CMD_ESTOP;
+//                     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+//                     keep_checking = false;
+//                     break;
+//                 }
+//             }
+//         }
+//         usleep(150000);
+//     }
+//     keep_checking = false;
+//     return;
+// }
+
+bool TsdfServer::followPath(int flag)
 {
     mav_planning_msgs::PolynomialTrajectory4D msg;
 
@@ -771,8 +894,7 @@ bool TsdfServer::followPath()
     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
     out.creation_time_ns = rc_nanos_monotonic_time();
     out.n_segments = msg.segments.size();
-    if (en_debug) printf("num segs: %d\n", out.n_segments);
-
+    out.traj_command = flag;
 
     for(int i = 0; i < msg.segments.size(); i++){
         if (msg.segments[i].num_coeffs > TRAJ_MAX_COEFFICIENTS){
@@ -781,18 +903,26 @@ bool TsdfServer::followPath()
         }
         out.segments[i].n_coef = msg.segments[i].num_coeffs;
         out.segments[i].duration_s = msg.segments[i].segment_time / 1000000000.0;
-        fprintf(stderr, "duration of segment %d: %6.5f\n", i, out.segments[i].duration_s);
+        if (en_debug) fprintf(stderr, "duration of segment %d: %6.5f\n", i, out.segments[i].duration_s);
 
         for(int j = 0; j < out.segments[i].n_coef; j++){
             out.segments[i].cx[j] = msg.segments[i].x[j];
             out.segments[i].cy[j] = msg.segments[i].y[j];
             out.segments[i].cz[j] = msg.segments[i].z[j];
-            fprintf(stderr, "segment %d-> x: %6.5f, y: %6.5f, z: %6.5f\n", i, out.segments[i].cx[j], out.segments[i].cy[j], out.segments[i].cz[j]);
+            if (en_debug) fprintf(stderr, "segment %d-> x: %6.5f, y: %6.5f, z: %6.5f\n", i, out.segments[i].cx[j], out.segments[i].cy[j], out.segments[i].cz[j]);
         }
 
     }
     printf("sending trajectory to plan channel\n");
     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+    // if (flag == TRAJ_CMD_LOAD_AND_START){
+        // if (collision_check_thread.joinable()){
+            // collision_check_thread.join();
+        // }
+        // collision_check_thread = std::thread(&TsdfServer::estop_thread, this);
+        // keep_checking = true;
+    // }
+
     return true;
 }
 
@@ -821,8 +951,11 @@ bool TsdfServer::loadMap(std::string tsdf_path, std::string esdf_path)
     if (esdf_loaded){
         printf("Successfully loaded ESDF layer.\n");
     }
-    planning = false;
     costmap_updates_only = false;
+    // updateEsdf(false);
+    usleep(250000);
+    planning = false;
+
     return (tsdf_loaded && esdf_loaded);
 }
 

@@ -91,7 +91,6 @@ voxl:/$ cat /etc/modalai/voxl-mapper.conf
  */
 {
 	"robot_radius":	0.2,
-	"point_skip":	7,
 	"voxel_size":	0.20000000298023224,
 	"voxels_per_side":	16,
 	"esdf_save_path":	"/data/voxl_mapper/esdf_map",
