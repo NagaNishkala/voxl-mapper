@@ -23,7 +23,7 @@ public:
 
     // rrt planner
     bool maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, std::shared_ptr<EsdfMap> esdf_map_ptr, mav_trajectory_generation::Trajectory* path_to_follow);
-    bool followPath(int flag);
+    bool followPath();
 
     /// mpa callbacks
     static void _pc_connect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context);
@@ -68,10 +68,6 @@ public:
     /// clears map
     virtual void clear();
 
-    /// follow helper thread
-    void estop_thread();
-
-
     // general public params
     bool en_debug;
     bool en_timing;
@@ -106,8 +102,6 @@ protected:
 
     // paths
     mav_trajectory_generation::Trajectory path_to_follow;
-    std::thread collision_check_thread;
-	std::atomic<bool> keep_checking;
 
     // costmap
     std::unordered_map<std::pair<double, double>, double, hash_pair> cost_map;

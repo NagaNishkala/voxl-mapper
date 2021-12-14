@@ -327,9 +327,10 @@ void Loco<N>::solveProblemCeres() {
 
   // Create an object.
   ceres::GradientProblem problem(new NestedCeresFunction(K_, num_free_, this));
-
+  
+  // options modified by mai, see here: http://ceres-solver.org/gradient_solver.html
   ceres::GradientProblemSolver::Options options;
-  options.line_search_direction_type = ceres::BFGS; // turi
+  options.line_search_direction_type = ceres::BFGS; 
   options.logging_type = ceres::SILENT;
   options.minimizer_progress_to_stdout = false;
   // options.use_approximate_eigenvalue_bfgs_scaling = true; // turi

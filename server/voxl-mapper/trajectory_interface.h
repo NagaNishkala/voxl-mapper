@@ -80,7 +80,6 @@ typedef struct trajectory_t{
 	uint32_t magic_number;		///< Unique 32-bit number used to signal the beginning of a VIO packet while parsing a data stream.
 	int64_t creation_time_ns;	///< timestamp in monotonic time when the trajectory was planned, 0 if unknown
 	int n_segments;				///< number of segments, must be 0<n<=MAX_SEGMENTS
-    int traj_command;           ///< command field, specifies what px4 should be doing upon receiving this trajectory
 	poly_segment_t segments[TRAJ_MAX_SEGMENTS];
 } __attribute__((packed)) trajectory_t;
 
