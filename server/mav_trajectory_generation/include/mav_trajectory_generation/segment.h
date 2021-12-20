@@ -117,8 +117,10 @@ class Segment {
  // Offset this segment by vector A_r_B.
  bool offsetSegment(const Eigen::VectorXd& A_r_B);
 
+ /// turi - making this public so I can use it
+ Polynomial::Vector polynomials_;
+
  protected:
-  Polynomial::Vector polynomials_;
   double time_;
 
  private:

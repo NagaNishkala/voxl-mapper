@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <mav_local_planner/conversions.h>
 #include <mav_trajectory_generation/trajectory_sampling.h>
+#include <mav_trajectory_generation/trajectory.h>
 
 
 
@@ -775,16 +776,17 @@ bool TsdfServer::followPath()
     }
     printf("sending trajectory to plan channel\n");
     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+    collision_thread_worker();
     return true;
 }
 
 bool TsdfServer::checkPoseForCollision(Eigen::Vector3d pose)
 {
     double distance = 0.0;
-    if (!(esdf_map->getDistanceAtPosition(position, false, &distance))) {
+    if (!(esdf_map_->getDistanceAtPosition(pose, false, &distance))) {
         return false; // no collision, area is technically unknown
     }
-    return (distance < robot_radius);
+    return (distance < robot_radius); // true if collision, false otherwise
 }
 
 static double __derivative(double x, double c[], int n)
@@ -797,20 +799,44 @@ static double __derivative(double x, double c[], int n)
 
 void TsdfServer::collision_thread_worker()
 {
+    static const double kCloseEnough = 0.075;
     static rc_tf_t latest_pose;
    
     // this gives us our nice little segments to check for collisions
     static mav_msgs::EigenTrajectoryPoint::Vector states;
     sampleWholeTrajectory(path_to_follow, 0.1, &states);
 
-    // need to get the coefficeints out of the segments
+    // lets get the vertices instead
+    static mav_trajectory_generation::Vertex::Vector vertices;
+    if (!path_to_follow.getVertices(mav_trajectory_generation::derivative_order::POSITION, &vertices)){
+        fprintf(stderr, "unable to get vertices of current path\n");
+        return;
+    }
+
+    // vertices = segments.size + 1
+    fprintf(stderr, "vertices size: %d\n", (int)vertices.size());
+
+    // need to get the coefficients out of the segments
     static std::vector<Eigen::VectorXd> coefficients;
-    Segment::Vector segments;
+    mav_trajectory_generation::Segment::Vector segments;
     path_to_follow.getSegments(&segments);
 
     int index = 0;
-    for (Segment seg : segments){ 
-        coefficients[index++] = seg.polynomials_.getCoefficients(0);
+    for (mav_trajectory_generation::Segment seg : segments){ 
+        // fprintf(stderr, "poly size for segment: %d\n", (int)seg.polynomials_.size());
+        // std::cout << seg.polynomials_[mav_trajectory_generation::derivative_order::POSITION].getCoefficients() << std::endl;
+
+        fprintf(stderr, "loop\n");
+        coefficients.push_back(seg.polynomials_[mav_trajectory_generation::derivative_order::POSITION].getCoefficients());
+
+
+        // size is related to the derivative. since we are optimizing to the third derivative, we have access to each derivative, but only need position
+        // for (int i = 0; i < seg.polynomials_.size(); i++){ 
+        //     fprintf(stderr, "poly %d coeffs\n", i);
+        //     std::cout << seg.polynomials_[i].getCoefficients() << std::endl;
+        // }
+        
+        // coefficients[index++] = seg.polynomials_.getCoefficients();
     }
 
     // above allows me to easily calculate distance between the curve states and our pose
@@ -838,12 +864,13 @@ void TsdfServer::collision_thread_worker()
             continue;
         }
         // latest_pose -> x is latest_pose.d[0][3]
-        for (int i = last_ind; i < coefficents.size(); i++ ){
+        for (int i = last_ind; i < coefficients.size(); i++ ){
             // take the derivative of the first couple, segments? need to keep track of where we left off
             // i here needs to be relative to where our last closest segment was
             double d = __derivative(latest_pose.d[0][3], coefficients[i].data(), coefficients[i].size());
             if (d < kCloseEnough){ // need to define that 
                 // that's our pose
+                fprintf(stderr, "found an exact match\n");
                 last_ind = i; 
                 break;
             }
@@ -852,6 +879,13 @@ void TsdfServer::collision_thread_worker()
                 last_ind = i;
             }
         }
+
+        // code above gives me the closest segment to our point, does that mean I have to look through the possible points in each segment now?
+
+        std::cout << "Current Position: " << latest_pose.d[0][3] << ", " << latest_pose.d[1][3] << ", " << latest_pose.d[2][3] << std::endl;
+        std::cout << "Selected Closest: " << vertices[last_ind] << ", " << vertices[last_ind + 1] << std::endl;
+        break;
+        // after the loop exits, we have our closest segment 
     }
 
 
