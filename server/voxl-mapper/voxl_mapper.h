@@ -59,6 +59,9 @@ public:
     virtual bool saveMap(std::string tsdf_path, std::string esdf_path); // saves tsdf + esdf maps
     virtual bool loadMap(std::string tsdf_path, std::string esdf_path); // loads tsdf + esdf maps
 
+    /// Collision Checking
+    bool checkPoseForCollision(Eigen::Vector3d pose);
+
 
     /// getters
     std::shared_ptr<EsdfMap> getEsdfMapPtr() { return esdf_map_; }
@@ -67,6 +70,9 @@ public:
 
     /// clears map
     virtual void clear();
+
+    /// follow helper thread
+    void collision_thread_worker();
 
     // general public params
     bool en_debug;
@@ -100,8 +106,11 @@ protected:
     Eigen::Vector3d start_pose;
     Eigen::Vector3d goal_pose;
 
-    // paths
+    // trajectory following
     mav_trajectory_generation::Trajectory path_to_follow;
+    std::thread collision_check_thread;
+    // not sure if we need this yet
+	std::atomic<bool> keep_checking;
 
     // costmap
     std::unordered_map<std::pair<double, double>, double, hash_pair> cost_map;

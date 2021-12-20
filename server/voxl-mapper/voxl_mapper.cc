@@ -778,6 +778,91 @@ bool TsdfServer::followPath()
     return true;
 }
 
+bool TsdfServer::checkPoseForCollision(Eigen::Vector3d pose)
+{
+    double distance = 0.0;
+    if (!(esdf_map->getDistanceAtPosition(position, false, &distance))) {
+        return false; // no collision, area is technically unknown
+    }
+    return (distance < robot_radius);
+}
+
+static double __derivative(double x, double c[], int n)
+{
+    double d = 0;
+    for (int i = 0; i < n; i++)
+        d += pow(x, i) * c[i];
+    return d;
+}
+
+void TsdfServer::collision_thread_worker()
+{
+    static rc_tf_t latest_pose;
+   
+    // this gives us our nice little segments to check for collisions
+    static mav_msgs::EigenTrajectoryPoint::Vector states;
+    sampleWholeTrajectory(path_to_follow, 0.1, &states);
+
+    // need to get the coefficeints out of the segments
+    static std::vector<Eigen::VectorXd> coefficients;
+    Segment::Vector segments;
+    path_to_follow.getSegments(&segments);
+
+    int index = 0;
+    for (Segment seg : segments){ 
+        coefficients[index++] = seg.polynomials_.getCoefficients(0);
+    }
+
+    // above allows me to easily calculate distance between the curve states and our pose
+    // only needs to be done on initial startup, which can be called as soon as the path is generated
+
+
+    // main loop
+    int last_ind = 0;
+    double least_dist = DBL_MAX;
+    while (1) // not sure what the end condition would be
+    {
+        // for each position update, I want it. Grab the tf at each position, xyz coords and use that
+        int ret = rc_tf_ringbuf_get_tf_at_time(&buf, rc_nanos_monotonic_time(), &latest_pose);
+        if (ret < 0){
+            fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
+            if (ret == -2){
+                printf("there wasn't sufficient data in the buffer\n");
+            }
+            if (ret == -3){
+                printf("the requested timestamp was too new\n");
+            }
+            if (ret == -4){
+                printf("the requested timestamp was too old\n");
+            }
+            continue;
+        }
+        // latest_pose -> x is latest_pose.d[0][3]
+        for (int i = last_ind; i < coefficents.size(); i++ ){
+            // take the derivative of the first couple, segments? need to keep track of where we left off
+            // i here needs to be relative to where our last closest segment was
+            double d = __derivative(latest_pose.d[0][3], coefficients[i].data(), coefficients[i].size());
+            if (d < kCloseEnough){ // need to define that 
+                // that's our pose
+                last_ind = i; 
+                break;
+            }
+            else if (d < least_dist){
+                least_dist = d;
+                last_ind = i;
+            }
+        }
+    }
+
+
+
+
+
+
+
+}
+
+
 bool TsdfServer::saveMap(std::string tsdf_path, std::string esdf_path)
 {
     bool tsdf_saved = tsdf_map_->getTsdfLayer().saveToFile(tsdf_path, true);
