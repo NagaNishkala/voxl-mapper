@@ -62,7 +62,6 @@ public:
     /// Collision Checking
     bool checkPoseForCollision(Eigen::Vector3d pose);
 
-
     /// getters
     std::shared_ptr<EsdfMap> getEsdfMapPtr() { return esdf_map_; }
     std::shared_ptr<TsdfMap> getTsdfMapPtr() { return tsdf_map_; }
@@ -71,8 +70,9 @@ public:
     /// clears map
     virtual void clear();
 
-    /// follow helper thread
+    /// follow helper threads
     void collision_thread_worker();
+    void collision_thread_response(Eigen::Vector3d goal_pose);
 
     // general public params
     bool en_debug;
@@ -109,6 +109,8 @@ protected:
     // trajectory following
     mav_trajectory_generation::Trajectory path_to_follow;
     std::thread collision_check_thread;
+    std::thread collision_response_thread;
+
     // not sure if we need this yet
 	std::atomic<bool> keep_checking;
 

@@ -396,7 +396,7 @@ bool RRTSTAR::checkCollisionWithRobot(Eigen::Vector3d robot_position)
     static double radius__ = robot_radius * 1.75;
     float distance = getMapDistance(robot_position);
     return radius__ >= (double)distance;
-}
+}   
 
 bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end)
 {
@@ -484,21 +484,36 @@ bool RRTSTAR::checkPathForCollisions(mav_msgs::EigenTrajectoryPointVector& path)
 
 bool RRTSTAR::locoSmooth(mav_msgs::EigenTrajectoryPointVector& coordinate_path, mav_msgs::EigenTrajectoryPointVector* path, mav_trajectory_generation::Trajectory* last_trajectory_)
 {
+    static const int max_retries = 3;
+    static const double sampling_interval = 0.05;
+
+    int attempts = 0;
     // loco_smoother_.setResampleTrajectory(true);
     // loco_smoother_.setAddWaypoints(false);
 
     // turi -- test
     // loco_smoother_.setPoly(coordinate_path.size(), loco_derivative_to_optimize);
-
-    bool got = loco_smoother_.getTrajectoryBetweenWaypoints(coordinate_path, last_trajectory_);
-
     bool success = false;
-    if (got){
-        mav_msgs::EigenTrajectoryPoint::Vector states;
-        double sampling_interval = 0.05;
-        success = mav_trajectory_generation::sampleWholeTrajectory(*last_trajectory_, sampling_interval, path);
-    }
-    return got && success;
+    mav_msgs::EigenTrajectoryPoint::Vector states;
+
+    while (attempts < max_retries && !success){
+        if (attempts > 0) fprintf(stderr, "RETRYING LOCO SMOOTHER\n");
+        if (loco_smoother_.getTrajectoryBetweenWaypoints(coordinate_path, last_trajectory_)){ // first, get the smoothed trajectory
+            if(mav_trajectory_generation::sampleWholeTrajectory(*last_trajectory_, sampling_interval, path)){ // then, sample it
+                for (int i = 0; i < path->size(); i++){ // now, check each state for collision
+                    float distance = getMapDistance((*path)[i].position_W);
+                    if (distance < (float)robot_radius && distance > 0.0f){
+                        std::cout << "Collision State: " << (*path)[i].position_W << ", Distance: " << distance << std::endl;
+                        attempts++;
+                        success = false;
+                        break;
+                    }
+                    success = true;
+                }
+            } else attempts++;   
+        } else attempts++;
+    }   
+    return success;
 }
 
 void RRTSTAR::drawTreeLayer(Node* root, std::vector<point_xyz> *tree)
@@ -765,7 +780,7 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
 
     // if root node (start) or end node not in graph, add em in before we smooth
     if (std::find(path.begin(), path.end(), root) == path.end()) path.push_back(root);
-    if (std::find(path.begin(), path.end(), end) == path.end())  path.insert(path.begin(), end);
+    if (solved) if (std::find(path.begin(), path.end(), end) == path.end())  path.insert(path.begin(), end);
 
     time_start = rc_nanos_monotonic_time();
     int removals = simplifyPath();

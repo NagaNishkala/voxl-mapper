@@ -776,6 +776,7 @@ bool TsdfServer::followPath()
     }
     printf("sending trajectory to plan channel\n");
     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+    // need this to start as a background thread
     collision_thread_worker();
     return true;
 }
@@ -786,114 +787,85 @@ bool TsdfServer::checkPoseForCollision(Eigen::Vector3d pose)
     if (!(esdf_map_->getDistanceAtPosition(pose, false, &distance))) {
         return false; // no collision, area is technically unknown
     }
-    return (distance < robot_radius); // true if collision, false otherwise
+    fprintf(stderr, "DISTANCE TO OBSTACLE: %6.2f\n", distance);
+    return (distance < robot_radius && distance > 0.0); // true if collision, false otherwise
 }
 
-static double __derivative(double x, double c[], int n)
+void TsdfServer::collision_thread_response(Eigen::Vector3d goal_pose)
 {
-    double d = 0;
-    for (int i = 0; i < n; i++)
-        d += pow(x, i) * c[i];
-    return d;
+    Eigen::Vector3d start_pose;
+    pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
+    start_pose << curr_pose.x(), curr_pose.y(), curr_pose.z();
+    pthread_mutex_unlock(&pose_mutex); // free mutex
+
+    maiRRT(start_pose, goal_pose, getEsdfMapPtr(), &path_to_follow);
 }
 
 void TsdfServer::collision_thread_worker()
 {
-    static const double kCloseEnough = 0.075;
-    static rc_tf_t latest_pose;
-   
-    // this gives us our nice little segments to check for collisions
-    static mav_msgs::EigenTrajectoryPoint::Vector states;
-    sampleWholeTrajectory(path_to_follow, 0.1, &states);
-
-    // lets get the vertices instead
-    static mav_trajectory_generation::Vertex::Vector vertices;
-    if (!path_to_follow.getVertices(mav_trajectory_generation::derivative_order::POSITION, &vertices)){
-        fprintf(stderr, "unable to get vertices of current path\n");
-        return;
-    }
-
-    // vertices = segments.size + 1
-    fprintf(stderr, "vertices size: %d\n", (int)vertices.size());
-
-    // need to get the coefficients out of the segments
-    static std::vector<Eigen::VectorXd> coefficients;
-    mav_trajectory_generation::Segment::Vector segments;
-    path_to_follow.getSegments(&segments);
-
-    int index = 0;
-    for (mav_trajectory_generation::Segment seg : segments){ 
-        // fprintf(stderr, "poly size for segment: %d\n", (int)seg.polynomials_.size());
-        // std::cout << seg.polynomials_[mav_trajectory_generation::derivative_order::POSITION].getCoefficients() << std::endl;
-
-        fprintf(stderr, "loop\n");
-        coefficients.push_back(seg.polynomials_[mav_trajectory_generation::derivative_order::POSITION].getCoefficients());
-
-
-        // size is related to the derivative. since we are optimizing to the third derivative, we have access to each derivative, but only need position
-        // for (int i = 0; i < seg.polynomials_.size(); i++){ 
-        //     fprintf(stderr, "poly %d coeffs\n", i);
-        //     std::cout << seg.polynomials_[i].getCoefficients() << std::endl;
-        // }
-        
-        // coefficients[index++] = seg.polynomials_.getCoefficients();
-    }
-
-    // above allows me to easily calculate distance between the curve states and our pose
-    // only needs to be done on initial startup, which can be called as soon as the path is generated
-
+    rc_tf_t latest_pose;
+    int64_t thread_start_ns = rc_nanos_monotonic_time();
+    int64_t total_runtime_ns = path_to_follow.getMaxTime() * 1000000000.0;
+    
+    // this gives us our nice pre-chopped states to check for collisions in
+    mav_msgs::EigenTrajectoryPoint::Vector states;
+    sampleWholeTrajectory(path_to_follow, 0.05, &states);
 
     // main loop
     int last_ind = 0;
     double least_dist = DBL_MAX;
-    while (1) // not sure what the end condition would be
+    while (rc_nanos_monotonic_time() - thread_start_ns > total_runtime_ns) // not sure what the end condition would be
     {
         // for each position update, I want it. Grab the tf at each position, xyz coords and use that
         int ret = rc_tf_ringbuf_get_tf_at_time(&buf, rc_nanos_monotonic_time(), &latest_pose);
         if (ret < 0){
             fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
-            if (ret == -2){
-                printf("there wasn't sufficient data in the buffer\n");
-            }
-            if (ret == -3){
-                printf("the requested timestamp was too new\n");
-            }
-            if (ret == -4){
-                printf("the requested timestamp was too old\n");
-            }
             continue;
         }
-        // latest_pose -> x is latest_pose.d[0][3]
-        for (int i = last_ind; i < coefficients.size(); i++ ){
-            // take the derivative of the first couple, segments? need to keep track of where we left off
-            // i here needs to be relative to where our last closest segment was
-            double d = __derivative(latest_pose.d[0][3], coefficients[i].data(), coefficients[i].size());
-            if (d < kCloseEnough){ // need to define that 
-                // that's our pose
-                fprintf(stderr, "found an exact match\n");
-                last_ind = i; 
-                break;
+
+        Eigen::Vector3d last_pose;
+        last_pose << latest_pose.d[0][3],latest_pose.d[1][3],latest_pose.d[2][3];
+
+        bool minima = false;
+        int minimia_fails = 0;
+        for (int i = last_ind; i < states.size(); i++){
+            // LOGIC: check each state, and once we have a state that is "close enough" to our current (i.e. < 0.05m dif), store it. 
+            // Check the 5? states following, if they don't get any closer exit loop
+            double d = (states[i].position_W - last_pose).norm();
+            if (minima){
+                if (d >= least_dist){
+                    minimia_fails++;
+                    if (minimia_fails >= 3) break; 
+                }
+                else {
+                    minimia_fails = 0;
+                }
             }
-            else if (d < least_dist){
+            if (d < least_dist){
                 least_dist = d;
                 last_ind = i;
+                if (d < 0.05){
+                    minima = true;
+                }
             }
         }
 
-        // code above gives me the closest segment to our point, does that mean I have to look through the possible points in each segment now?
+        std::cout << "Selected State: " << states[last_ind].position_W << std::endl;
+        std::cout << "Distance between states: " << (states[last_ind].position_W - last_pose).norm() << std::endl;
 
-        std::cout << "Current Position: " << latest_pose.d[0][3] << ", " << latest_pose.d[1][3] << ", " << latest_pose.d[2][3] << std::endl;
-        std::cout << "Selected Closest: " << vertices[last_ind] << ", " << vertices[last_ind + 1] << std::endl;
-        break;
-        // after the loop exits, we have our closest segment 
+        for (int i = last_ind; i < states.size(); i++){
+            if (checkPoseForCollision(states[i].position_W)){
+                fprintf(stderr, "COLLISION IMMINENT. EXITING\n");
+                std::cout << "Collision State: " << states[i].position_W << std::endl;
+                // send estop packet here, once traj_int stuff is merged in
+
+                // then fire up response thread
+                collision_response_thread = std::thread(&TsdfServer::collision_thread_response, this, std::ref(states.back().position_W));
+                return;
+            }
+        }
+        // otherwise, just continue the loop until we're done OR the traj is finished by time
     }
-
-
-
-
-
-
-
 }
 
 
