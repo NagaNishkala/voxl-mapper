@@ -48,20 +48,21 @@
 #define MPA_POINT_CLOUD_CH 8
 
 // control stuff
-#define PLAN_HOME       "plan_home"
-#define RESET_VIO       "reset_vio"
-#define SAVE_MAP        "save_map"
-#define LOAD_MAP        "load_map"
-#define CLEAR_MAP       "clear_map"
-#define PLAN_TO         "plan_to"
-#define FOLLOW_PATH     "follow_path"
-#define PLAN_STORE      "store_path"
-#define PLAN_ESTOP      "stop_path"
-#define PLAN_PAUSE      "pause_path"
-#define PLAN_RESUME     "resume_path"
+#define PLAN_HOME           "plan_home"
+#define RESET_VIO           "reset_vio"
+#define SAVE_MAP            "save_map"
+#define LOAD_MAP            "load_map"
+#define CLEAR_MAP           "clear_map"
+#define PLAN_TO             "plan_to"
+#define FOLLOW_PATH         "follow_path"
+#define PLAN_STORE          "store_path"
+#define PLAN_ESTOP          "stop_path"
+#define PLAN_PAUSE          "pause_path"
+#define PLAN_RESUME         "resume_path"
+#define SLICE_LVL_UPDATE    "slice_level:"
 
 
-#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH "," PLAN_ESTOP "," PLAN_STORE "," PLAN_PAUSE "," PLAN_RESUME)
+#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH "," PLAN_ESTOP "," PLAN_STORE "," PLAN_PAUSE "," PLAN_RESUME "," SLICE_LVL_UPDATE)
 
 pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
 rc_tfv_ringbuf_t buf = RC_TF_RINGBUF_INITIALIZER;
@@ -423,14 +424,26 @@ void TsdfServer::integratePointcloud(const Transformation &T_G_C, const Pointclo
 
 void TsdfServer::publish2DCostmap()
 {
-    pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-    float height = curr_pose.z();
-    pthread_mutex_unlock(&pose_mutex); // return mutex lock
-    if (planning) return; //|| keep_checking) return;
+    static int8_t counter = 0;
+    static Eigen::Vector3d lower_bound;
+    static Eigen::Vector3d upper_bound;
 
-    if (en_debug) printf("Generating CostMap\n");
+    if (counter % 5 == 0){
+        voxblox::utils::computeMapBoundsFromLayer(*esdf_map_->getEsdfLayerPtr(), &lower_bound, &upper_bound);
+        counter = 0;
+    }
+    else counter++;
+
+    float height = lower_bound.z()+2.0;
+    double dif = upper_bound.z()-lower_bound.z()-4.0;
+    dif *= (costmap_height/100);
+    height += (float)dif;
+
+    if (planning) return;
+
+    if (en_debug) printf("Generating CostMap at z:%6.2f\n", (double) height);
     uint64_t start_time = rc_nanos_monotonic_time();
-    create2DCostmap(esdf_map_->getEsdfLayer(), height, 0.20, cost_map, costmap_updates_only);
+    create2DCostmap(esdf_map_->getEsdfLayer(), height, 0.20, cost_map, false);
     uint64_t end_time = rc_nanos_monotonic_time();
     if (en_timing){
         printf("Generating CostMap Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
@@ -643,7 +656,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 	    server->clear();
 		return;
 	}
-    else if(strncmp(string, "plan_to", 7)==0){
+    else if(strncmp(string, PLAN_TO, 7)==0){
         server->planning = true;
 
 		printf("Client requested plan to location\n");
@@ -725,6 +738,16 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         out.n_segments = 0;
         out.traj_command = TRAJ_CMD_START;
         pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        return;
+    }
+    else if(strncmp(string, SLICE_LVL_UPDATE, 12)==0){
+        printf("Client requested slice level update\n");
+        char* goal_ptr;
+        goal_ptr = strtok (string, ":");
+        goal_ptr = strtok (NULL, ":");
+        std::string goal_str(goal_ptr);
+        double height = std::stod(goal_str);
+        server->costmap_height = height;
         return;
     }
     else if (server->en_debug){
