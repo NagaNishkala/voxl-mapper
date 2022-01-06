@@ -55,9 +55,13 @@
 #define CLEAR_MAP       "clear_map"
 #define PLAN_TO         "plan_to"
 #define FOLLOW_PATH     "follow_path"
+#define PLAN_STORE      "store_path"
+#define PLAN_ESTOP      "stop_path"
+#define PLAN_PAUSE      "pause_path"
+#define PLAN_RESUME     "resume_path"
 
 
-#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH)
+#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH "," PLAN_ESTOP "," PLAN_STORE "," PLAN_PAUSE "," PLAN_RESUME)
 
 pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
 rc_tfv_ringbuf_t buf = RC_TF_RINGBUF_INITIALIZER;
@@ -681,9 +685,46 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         server->planning = false;
 		return;
 	}
-	else if(strcmp(string, FOLLOW_PATH)==0){
-        fprintf(stderr, "Client requested to follow last path\n");
-        server->followPath();
+    else if(strcmp(string, FOLLOW_PATH)==0){
+        printf("Client requested to follow last path\n");
+        server->followPath(TRAJ_CMD_LOAD_AND_START);
+        return;
+    }
+    else if(strcmp(string, PLAN_STORE)==0){
+        printf("Client requested to store the current path\n");
+        server->followPath(TRAJ_CMD_LOAD);
+        return;
+    }
+    else if(strcmp(string, PLAN_ESTOP)==0){
+        printf("Client requested emergency stop!\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_ESTOP;
+        if (server->collision_check_thread.joinable()) server->collision_check_thread.join();
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        return;
+    }
+    else if(strcmp(string, PLAN_PAUSE)==0){
+        printf("Client requested pause path follow\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_PAUSE;
+        if (server->collision_check_thread.joinable()) server->collision_check_thread.join();
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+        return;
+    }
+    else if(strcmp(string, PLAN_RESUME)==0){
+        printf("Client requested resume path follow\n");
+        trajectory_t out;
+        out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+        out.creation_time_ns = 0;
+        out.n_segments = 0;
+        out.traj_command = TRAJ_CMD_START;
+        pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
         return;
     }
     else if (server->en_debug){
@@ -743,7 +784,7 @@ bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, s
     return ret;
 }
 
-bool TsdfServer::followPath()
+bool TsdfServer::followPath(int traj_cmd)
 {
     mav_planning_msgs::PolynomialTrajectory4D msg;
 
@@ -761,6 +802,7 @@ bool TsdfServer::followPath()
     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
     out.creation_time_ns = rc_nanos_monotonic_time();
     out.n_segments = msg.segments.size();
+    out.traj_command = traj_cmd;
 
     for(int i = 0; i < msg.segments.size(); i++){
         if (msg.segments[i].num_coeffs > TRAJ_MAX_COEFFICIENTS){
@@ -778,12 +820,11 @@ bool TsdfServer::followPath()
             if (en_debug) fprintf(stderr, "segment %d-> x: %6.5f, y: %6.5f, z: %6.5f\n", i, out.segments[i].cx[j], out.segments[i].cy[j], out.segments[i].cz[j]);
         }
     }
-    printf("Sending trajectory to plan channel\n");
     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
 
     // need this to start as a background thread
     if (collision_check_thread.joinable()) collision_check_thread.join();
-    collision_check_thread = std::thread(&TsdfServer::collision_thread_worker, this);
+    if (traj_cmd != TRAJ_CMD_LOAD_AND_START) collision_check_thread = std::thread(&TsdfServer::collision_thread_worker, this);
 
     return true;
 }
@@ -863,13 +904,21 @@ void TsdfServer::collision_thread_worker()
             if (checkPoseForCollision(states[i].position_W)){
                 fprintf(stderr, "COLLISION IMMINENT. HALTING PATH AND REPLANNING\n");
                 // send estop packet here, once traj_int stuff is merged in
-
+                trajectory_t out;
+                out.magic_number = TRAJECTORY_MAGIC_NUMBER;
+                out.creation_time_ns = 0;
+                out.n_segments = 0;
+                out.traj_command = TRAJ_CMD_ESTOP;
+                pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
                 // then fire up response thread
                 collision_response_thread = std::thread(&TsdfServer::collision_thread_response, this, std::ref(states.back().position_W));
                 total_runtime_ns = 0;
                 return;
             }
         }
+
+        if (last_ind >= states.size()-2) return;
+
         // otherwise, just continue the loop until we're done OR the traj is finished by time
         usleep(1000000/15);
     }
