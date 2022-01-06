@@ -198,7 +198,7 @@ inline void create2DCostmap(const Layer<EsdfVoxel>& layer, float start_height, f
     unsigned int free_plane_index = 2;
 
     if (std::remainder(free_plane_val, layer.voxel_size()) < 1e-6f) {
-        free_plane_val += layer.voxel_size() / 2.0f;
+        free_plane_val += (layer.voxel_size() / 2.0f);
     }
     createCostmapFromLayer(layer, free_plane_index, free_plane_val, robot_radius, cost_map, only_updates);
 

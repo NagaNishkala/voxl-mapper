@@ -425,6 +425,8 @@ void TsdfServer::integratePointcloud(const Transformation &T_G_C, const Pointclo
 void TsdfServer::publish2DCostmap()
 {
     static int8_t counter = 0;
+
+    static const bool costmap_only_updated_blocks = true;
     static Eigen::Vector3d lower_bound;
     static Eigen::Vector3d upper_bound;
 
@@ -434,24 +436,22 @@ void TsdfServer::publish2DCostmap()
     }
     else counter++;
 
-    float height = lower_bound.z()+2.0;
-    double dif = upper_bound.z()-lower_bound.z()-4.0;
+    float height = upper_bound.z()-1.0;
+    double dif = upper_bound.z()-lower_bound.z()-2.0;
     dif *= (costmap_height/100);
-    height += (float)dif;
+    height -= (float)dif;
 
     if (planning) return;
 
     if (en_debug) printf("Generating CostMap at z:%6.2f\n", (double) height);
     uint64_t start_time = rc_nanos_monotonic_time();
-    create2DCostmap(esdf_map_->getEsdfLayer(), height, 0.20, cost_map, false);
+    create2DCostmap(esdf_map_->getEsdfLayer(), height, robot_radius, cost_map, costmap_only_updated_blocks);
     uint64_t end_time = rc_nanos_monotonic_time();
     if (en_timing){
         printf("Generating CostMap Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
     }
 
-    costmap_updates_only = true;
-
-    std::vector<point_xyz_i> cost_map_ptc;
+    static std::vector<point_xyz_i> cost_map_ptc;
 
     for (auto it: cost_map){
         point_xyz_i pt;
@@ -479,6 +479,7 @@ void TsdfServer::publish2DCostmap()
     costmap_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZC;
 
     pipe_server_write_point_cloud(COSTMAP_CH, costmap_meta, cost_map_ptc.data());
+    cost_map_ptc.clear();
 }
 
 void TsdfServer::updateEsdf(bool clear_updated_flag)
