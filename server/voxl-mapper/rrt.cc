@@ -4,6 +4,7 @@
 #include <mav_trajectory_generation/trajectory_sampling.h>
 #include <voxblox/core/common.h>
 
+#define RRT_PRINT "[RRT]"
 
 /////////////////////////////////////////////////////////////////////
 // General Helper Funcs
@@ -27,11 +28,13 @@ static bool operator==(const point_xyz& lhs, const point_xyz& rhs)
 }
 
 // Constructor
-RRTSTAR::RRTSTAR(Eigen::Vector3d start, Eigen::Vector3d end, std::shared_ptr<voxblox::EsdfMap> esdf_map_)
+RRTSTAR::RRTSTAR(Eigen::Vector3d start, Eigen::Vector3d end, std::shared_ptr<voxblox::EsdfMap> esdf_map_, bool en_debug_, bool en_timing_)
 {
     startPos = start;
     endPos = end;
     esdf_map = esdf_map_;
+    en_debug = en_debug_;
+    en_timing = en_timing_;
 
     srand((unsigned)time(NULL));
     computeMapBounds();
@@ -53,7 +56,6 @@ RRTSTAR::RRTSTAR(Eigen::Vector3d start, Eigen::Vector3d end, std::shared_ptr<vox
     loco_params.split_at_collisions_ = loco_split_at_collisions;
 
     loco_smoother_.setParameters(loco_params);
-    // loco_smoother_.setMapDistanceCallback(std::bind(&RRTSTAR::getMapDistance, this, std::placeholders::_1));
     loco_smoother_.setInCollisionCallback(std::bind(&RRTSTAR::checkCollisionWithRobot, this, std::placeholders::_1));
     loco_smoother_.setDistanceAndGradientFunction(std::bind(&RRTSTAR::getMapDistanceAndGradient, this, std::placeholders::_1, std::placeholders::_2));
 
@@ -63,14 +65,6 @@ RRTSTAR::RRTSTAR(Eigen::Vector3d start, Eigen::Vector3d end, std::shared_ptr<vox
     loco_smoother_.loco_config.w_d = loco_smoothness_cost_weight;
     loco_smoother_.loco_config.w_c = loco_collision_cost_weight;
     loco_smoother_.loco_config.w_w = loco_waypoint_cost_weight;
-
-    std::string benchmark_path = BENCHMARK_FILE;
-    if (!exists_(benchmark_path)){
-        std::ofstream outfile (benchmark_path);
-        // header
-        outfile << "Version,Collision,Distance,Total Time,Random Node Time,Nearest Node Time,Check Motion Time,Neighborhood Time,Children Update Time,Attempts,Nearest Fails,Random to Nearest Fails,Partial Segments,Tree Rewires\n";
-        outfile.close();
-    }
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -79,15 +73,18 @@ RRTSTAR::RRTSTAR(Eigen::Vector3d start, Eigen::Vector3d end, std::shared_ptr<vox
 bool RRTSTAR::computeMapBounds()
 {
     if(esdf_map == nullptr){
-        fprintf(stderr, "ERROR: esdf map is nullptr, cannot compute map bounds.\n");
+        fprintf(stderr, "%s ERROR: esdf map is nullptr, cannot compute map bounds.\n", RRT_PRINT);
         return false;
     }
 
     voxblox::utils::computeMapBoundsFromLayer(*esdf_map->getEsdfLayerPtr(), &lower_bound, &upper_bound);
 
-    printf("Map Bounds:\n");
-    printf("Lower-> x:%6.2f, y:%6.2f, z:%6.2f\n", lower_bound.x(), lower_bound.y(), lower_bound.z());
-    printf("Upper-> x:%6.2f, y:%6.2f, z:%6.2f\n", upper_bound.x(), upper_bound.y(), upper_bound.z());
+    if (en_debug){
+        printf("%s Map Bounds:\n", RRT_PRINT);
+        printf("%s Lower-> x:%6.2f, y:%6.2f, z:%6.2f\n", RRT_PRINT, lower_bound.x(), lower_bound.y(), lower_bound.z());
+        printf("%s Upper-> x:%6.2f, y:%6.2f, z:%6.2f\n", RRT_PRINT, upper_bound.x(), upper_bound.y(), upper_bound.z());
+    }
+
 
     ind_lower[0] = (double)lower_bound.x()/((double)voxels_per_side * (double)voxel_size);
     ind_lower[1] = (double)lower_bound.y()/((double)voxels_per_side * (double)voxel_size);
@@ -119,6 +116,7 @@ double RRTSTAR::PathCost(Node *qFrom, Node *qTo)
 
     for(Node *cur = qFrom; cur != qTo; cur = cur->parent){
         if(cur->parent == NULL){
+            // should never happen
             throw("ERROR: PathCost reached a node without a parent");
         }
         if (cur->parent->position == endPos) break;
@@ -226,17 +224,6 @@ void RRTSTAR::near(Eigen::Vector3d point, vector<Node *>& out_nodes)
     }
 
     return;
-    // // return the whole container
-    // int actual_index = flatIndexfromPoint(point);
-
-    // if(!nodes[actual_index].empty()){
-    //     out_nodes.insert(out_nodes.end(), nodes[actual_index].begin(), nodes[actual_index].end());
-    // }
-    // else {
-    //     actual_index = binSelect(actual_index);
-    //     out_nodes.insert(out_nodes.end(), nodes[actual_index].begin(), nodes[actual_index].end());
-    // }
-    // return;
 }
 
 int RRTSTAR::flatIndexfromPoint(Eigen::Vector3d point)
@@ -272,7 +259,6 @@ Node* RRTSTAR::nearest(Eigen::Vector3d point, bool end)
     }
 
     if (closest == NULL) {
-    // else {
         actual_index = binSelect(actual_index);
         if (!nodes[actual_index].empty()){
             for (int i = 0; i < nodes[actual_index].size(); i++){
@@ -383,10 +369,7 @@ double RRTSTAR::getMapDistanceAndGradient(const Eigen::Vector3d& position, Eigen
     double distance = 0.0;
     if (!(esdf_map->getDistanceAndGradientAtPosition(position, false, &distance, gradient))) {
         // if we cannot identify a voxel close enough to this location WITHOUT interpolation, it is unknown so reject it
-        // if (rrt_treat_unknown_as_occupied){
             return 0.0;
-        // }
-        // else return esdf_default_distance;
     }
     return distance;
 }
@@ -396,7 +379,7 @@ bool RRTSTAR::checkCollisionWithRobot(Eigen::Vector3d robot_position)
     static double radius__ = robot_radius * 1.75;
     float distance = getMapDistance(robot_position);
     return radius__ >= (double)distance;
-}   
+}
 
 bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end)
 {
@@ -413,7 +396,6 @@ bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end, std::pair<
     Eigen::Vector3d direction_vec = end - start;
     double path_length = distance(start, end);
 
-    // int dist_val = path_length;
     static const int max_jump = 0.75;
 
     for (double i = 0.1; i < path_length; i+=0.1){
@@ -424,7 +406,7 @@ bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end, std::pair<
             if (last_valid.first != nullptr){
                 memcpy(last_valid.first, &new_pt, sizeof(new_pt));
                 last_valid.second = static_cast<double>(i);
-                i+=getMapDistance(new_pt);
+                i+=(0.1);
             }
         }
         if (i >= max_jump) return false;
@@ -440,11 +422,11 @@ void RRTSTAR::nodesToEigen(mav_msgs::EigenTrajectoryPointVector* eigen_path)
 {
     // sanity checks
     if (eigen_path == nullptr){
-        fprintf(stderr, "Output path is a nullptr!\n");
+        fprintf(stderr, "%s Output path is a nullptr!\n", RRT_PRINT);
         return;
     }
     else if (path.empty()){
-        fprintf(stderr, "Waypoint path is empty!\n");
+        fprintf(stderr, "%s Waypoint path is empty!\n", RRT_PRINT);
         return;
     }
 
@@ -484,35 +466,59 @@ bool RRTSTAR::checkPathForCollisions(mav_msgs::EigenTrajectoryPointVector& path)
 
 bool RRTSTAR::locoSmooth(mav_msgs::EigenTrajectoryPointVector& coordinate_path, mav_msgs::EigenTrajectoryPointVector* path, mav_trajectory_generation::Trajectory* last_trajectory_)
 {
-    static const int max_retries = 3;
-    static const double sampling_interval = 0.05;
+    static const int max_retries = 2;
+    static double sampling_interval = 0.05;
 
     int attempts = 0;
-    // loco_smoother_.setResampleTrajectory(true);
-    // loco_smoother_.setAddWaypoints(false);
+
+    bool removal = false;
 
     // turi -- test
-    // loco_smoother_.setPoly(coordinate_path.size(), loco_derivative_to_optimize);
     bool success = false;
     mav_msgs::EigenTrajectoryPoint::Vector states;
+    mav_msgs::EigenTrajectoryPoint::Vector path_holder = coordinate_path;
+
 
     while (attempts < max_retries && !success){
-        if (attempts > 0) fprintf(stderr, "RETRYING LOCO SMOOTHER\n");
-        if (loco_smoother_.getTrajectoryBetweenWaypoints(coordinate_path, last_trajectory_)){ // first, get the smoothed trajectory
+        loco_smoother_.setPoly(coordinate_path.size(), loco_derivative_to_optimize);
+
+        if (loco_smoother_.getTrajectoryBetweenWaypoints(path_holder, last_trajectory_)){ // first, get the smoothed trajectory
             if(mav_trajectory_generation::sampleWholeTrajectory(*last_trajectory_, sampling_interval, path)){ // then, sample it
                 for (int i = 0; i < path->size(); i++){ // now, check each state for collision
                     float distance = getMapDistance((*path)[i].position_W);
                     if (distance < (float)robot_radius && distance > 0.0f){
-                        std::cout << "Collision State: " << (*path)[i].position_W << ", Distance: " << distance << std::endl;
                         attempts++;
+
+                        if (!removal && attempts == max_retries){
+                            // if we're about to exit, failed, and have yet to try a smooth of the partial valid trajectory
+                            path->erase(path->begin() + i, path->end()); // remove collision state and beyond from path
+                            path_holder = *path;                         // set this as our base waypoints
+                            attempts -= 1;                               // one extra attempt for this
+                            removal = true;
+
+                            // thin out the subsampled waypoints
+                            for (int i = 0; i < path->size(); i += 2)
+                                path->erase(path->begin() + i);
+                            fprintf(stderr, "%s Loco smoother failed max times. attempting partial path smooth\n", RRT_PRINT);
+                        }
+                        else {
+                            mav_planning::locoParams loco_params;
+                            loco_params.resample_trajectory_ = loco_resample_trajectory;
+                            loco_params.num_segments_ = loco_num_segments+attempts;
+                            loco_params.add_waypoints_ = loco_add_waypoints;
+                            loco_params.scale_time_ = loco_scale_time;
+                            loco_params.split_at_collisions_ = loco_split_at_collisions;
+
+                            loco_smoother_.setParameters(loco_params);
+                        }
                         success = false;
                         break;
                     }
                     success = true;
                 }
-            } else attempts++;   
+            } else attempts++;
         } else attempts++;
-    }   
+    }
     return success;
 }
 
@@ -543,7 +549,7 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
 
     // check if valid before starting exploration
     if (checkMotion( root->position, end->position )){
-        fprintf(stderr, "collision free path!\n");
+        printf("%s Collision free path!\n", RRT_PRINT);
         path.push_back(root);
         path.push_back(end);
 
@@ -588,7 +594,7 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
 
         if (use_two_d){
             if (two_d_fails >= 25){
-                fprintf(stderr, "Switching to 3D checks\n");
+                if (en_debug) printf("%s Switching to 3D checks\n", RRT_PRINT);
                 use_two_d = false;
             }
             else if (dist_to_goal <= man_dist(lastNode->position, endPos)) two_d_fails++;
@@ -601,7 +607,6 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
         time_start = rc_nanos_monotonic_time();
         Node *qRand = getRandomNode(use_two_d);
         if (attempts % 5 == 0){         // try to pull towards goal indirectly
-            // qRand->position = Eigen::Vector3d( end->position.x(),  end->position.y(), qRand->position.z());
             switch(rand_ind){
                 case 0:
                     qRand->position = Eigen::Vector3d( qRand->position.x(),  end->position.y(), end->position.z());
@@ -738,36 +743,42 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
         if (!solved && reached()){
             solved = true;
             end_time = rc_nanos_monotonic_time();
-            fprintf(stderr, "RRTSTAR Reached Destination\n");
+            printf("%s RRTSTAR Reached Destination\n", RRT_PRINT);
             if(rrt_use_first_solution) break;
-            else fprintf(stderr, "Attempting to refine current path");
+            else printf("%s Attempting to refine current path\n", RRT_PRINT);
         }
     }
     if (!solved) end_time = rc_nanos_monotonic_time();
 
-    printf("\n------------------------------------------\n");
-    printf("TIMING STATS\n");
-    printf("------------------------------------------\n");
-    printf("Solve time             ->          %6.2fms\n", (double)(end_time - start_time)/1000000.0 );
-    printf("Total time             ->          %6.2fms\n", (double)(rc_nanos_monotonic_time() - start_time)/1000000.0);
-    printf("Random node grab time  -> Average: %6.2fms, TOT: %6.2fms\n", (double)((random_node_t/(1000000* random_node_count))), random_node_t/1000000.0);
-    printf("Nearest node time      -> Average: %6.2fms, TOT: %6.2fms\n", (double)((nearest_t/(1000000* nearest_count))), nearest_t/1000000.0);
-    printf("Check motion time      -> Average: %6.2fms, TOT: %6.2fms\n", (double)((check_motion_t/(1000000* motion_count))), check_motion_t/1000000.0);
-    printf("Neighborhood grab time -> Average: %6.2fms, TOT: %6.2fms\n", (double)((neighborhood_t/(1000000* neighborhood_count))), neighborhood_t/1000000.0);
-    printf("Children update time   -> Average: %6.2fms, TOT: %6.2fms\n", (double)((children_t/(1000000* children_count))), children_t/1000000.0);
-    printf("\n------------------------------------------\n");
-    printf("GENERAL STATS\n");
-    printf("------------------------------------------\n");
-    printf("PATH LENGTH: %6.2f\n", distance(startPos, endPos));
-    printf("ATTEMPTS: %d\n", attempts);
-    printf("QNEAREST FAILS: %d\n", qnearest_fails);
-    printf("RANDOM TO NEAREST FAILS: %d\n", random_to_nearest_fails);
-    printf("PARTIAL SEGMENTS ADDED: %d\n", partial_segments_added);
-    printf("TREE REWIRES: %d\n", rewires);
-    printf("------------------------------------------\n");
+    if (en_timing){
+        printf("\n------------------------------------------\n");
+        printf("%s TIMING STATS\n", RRT_PRINT);
+        printf("------------------------------------------\n");
+        printf("%s Solve time             ->          %6.2fms\n", RRT_PRINT, (double)(end_time - start_time)/1000000.0 );
+        printf("%s Total time             ->          %6.2fms\n", RRT_PRINT, (double)(rc_nanos_monotonic_time() - start_time)/1000000.0);
+        printf("%s Random node grab time  -> Average: %6.2fms, TOT: %6.2fms\n", RRT_PRINT, (double)((random_node_t/(1000000* random_node_count))), random_node_t/1000000.0);
+        printf("%s Nearest node time      -> Average: %6.2fms, TOT: %6.2fms\n", RRT_PRINT, (double)((nearest_t/(1000000* nearest_count))), nearest_t/1000000.0);
+        printf("%s Check motion time      -> Average: %6.2fms, TOT: %6.2fms\n", RRT_PRINT, (double)((check_motion_t/(1000000* motion_count))), check_motion_t/1000000.0);
+        printf("%s Neighborhood grab time -> Average: %6.2fms, TOT: %6.2fms\n", RRT_PRINT, (double)((neighborhood_t/(1000000* neighborhood_count))), neighborhood_t/1000000.0);
+        printf("%s Children update time   -> Average: %6.2fms, TOT: %6.2fms\n", RRT_PRINT, (double)((children_t/(1000000* children_count))), children_t/1000000.0);
+        printf("\n------------------------------------------\n");
+    }
+
+    if (en_debug){
+        printf("\n------------------------------------------\n");
+        printf("%s GENERAL STATS\n", RRT_PRINT);
+        printf("------------------------------------------\n");
+        printf("%s PATH LENGTH: %6.2f\n", RRT_PRINT, distance(startPos, endPos));
+        printf("%s ATTEMPTS: %d\n", RRT_PRINT, attempts);
+        printf("%s QNEAREST FAILS: %d\n",  RRT_PRINT, qnearest_fails);
+        printf("%s RANDOM TO NEAREST FAILS: %d\n", RRT_PRINT, random_to_nearest_fails);
+        printf("%s PARTIAL SEGMENTS ADDED: %d\n",  RRT_PRINT, partial_segments_added);
+        printf("%s TREE REWIRES: %d\n", RRT_PRINT, rewires);
+        printf("------------------------------------------\n");
+    }
 
     Node *q;
-    if (!solved) printf("RRTSTAR FAILED: Exceeded max iterations. Outputting closest path\n");
+    if (!solved) printf("%s RRTSTAR FAILED: Exceeded max iterations. Outputting closest path\n", RRT_PRINT);
     if (rrt_use_first_solution) q = lastNode;
     else if (end->parent) q = end;
     else q = nearest(endPos, true);
@@ -785,7 +796,8 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
     time_start = rc_nanos_monotonic_time();
     int removals = simplifyPath();
     time_end = rc_nanos_monotonic_time();
-    fprintf(stderr, "Simplifying Path took: %6.2fms\nRemoved %d nodes\n", (time_end - time_start)/ 1000000.0, removals);
+    if (en_timing) printf("%s Simplifying Path took: %6.2fms\n", RRT_PRINT, (time_end - time_start)/ 1000000.0);
+    if (en_debug) printf("%s Removed %d nodes from base path\n", RRT_PRINT,  removals);
 
     // reverse!!!
     std::reverse(path.begin(), path.end());
@@ -794,17 +806,14 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
     nodesToEigen(&base_path);
 
     bool collisions_on_base = checkPathForCollisions(base_path);
-    fprintf(stderr, "Collisions along base path-> %s\n", collisions_on_base ? "yes" : "no");
-
-    std::ofstream myfile;
-    myfile.open (BENCHMARK_FILE, ios_base::app);
-    myfile << RRT_VERSION << ", " <<  (collisions_on_base ? "no" : "yes") << ", " << distance(startPos, endPos) << ", " << (double)(rc_nanos_monotonic_time() - start_time)/1000000.0 << ", " << random_node_t/1000000.0 << ", " << nearest_t/1000000.0 << ", " << check_motion_t/1000000.0 << ", " << neighborhood_t/1000000.0 << ", " << children_t/1000000.0 << ", " << attempts << ", " << qnearest_fails << ", " << random_to_nearest_fails << ", " << partial_segments_added << ", " << rewires << "\n";
-    myfile.close();
+    if (en_debug) printf("%s Collisions along base path-> %s\n", RRT_PRINT, collisions_on_base ? "yes" : "no");
 
     time_start = rc_nanos_monotonic_time();
     bool loco_success = locoSmooth(base_path, &loco_path, last_trajectory_);
     time_end = rc_nanos_monotonic_time();
-    fprintf(stderr, "Loco Smooth took: %6.2fms\nSuccess-> %s\n", (time_end - time_start)/ 1000000.0, loco_success ? "yes" : "no");
+    if (en_timing) printf("%s Loco Smooth took: %6.2fms\n", RRT_PRINT, (time_end - time_start)/1000000.0);
+    if (loco_success) printf("%s Loco smoother succeeded!\n", RRT_PRINT);
+    else printf("%s Loco smoother failed.\n", RRT_PRINT);
 
     deleteNodes(root);
     return;

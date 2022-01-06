@@ -78,7 +78,6 @@ bool trajectoryToPolynomialTrajectoryMsg(
     trajectory.getSegments(&segments);
 
     msg->segments.reserve(segments.size());
-    printf("%lu SEGMENTS\n", segments.size());
     for (size_t i = 0; i < segments.size(); ++i) {
         const Segment& segment = segments[i];
 

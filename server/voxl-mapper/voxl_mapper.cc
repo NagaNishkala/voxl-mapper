@@ -110,9 +110,11 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     if (server->planning) return;
 
     static int mesh_timer = 1;
+
     //check if falling behind
     if (pipe_client_bytes_in_pipe(MPA_POINT_CLOUD_CH) > 0){
-        fprintf(stderr, "WARNING bytes left in tof point cloud pipe\n");
+        if (server->en_debug) printf("WARNING bytes left in tof point cloud pipe\n");
+        return;
     }
 
     // validate data
@@ -121,7 +123,7 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     if (data_array == NULL)
         return;
     if (n_packets > 1){
-        fprintf(stderr, "skipped %d point clouds\n", n_packets - 1);
+        if (server->en_debug) printf("Skipped %d point clouds\n", n_packets - 1);
     }
 
     // grab the latest packet if we got more than 2 point clouds in 1 pipe read
@@ -237,7 +239,6 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     if (mesh_timer % 12 == 0){
         mesh_timer = 0;
         if (!server->planning){
-            server->updateMesh();
             // ***WARN***
             // cannot update the esdf map when it is being used for collision checking in the planner
             // after a path plan completes, updating the esdf map will take SIGNIFICANTLY longer after
@@ -245,6 +246,7 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
             // **********
             server->updateEsdf(true);
             server->publish2DCostmap();
+            server->updateMesh();
         }
     }
 
@@ -340,23 +342,23 @@ int TsdfServer::initMPA(){
     };
 
     if (pipe_server_create(COSTMAP_CH, costmap_info, flags)){
-        printf("FAILED TO START COSTMAP SERVER PIPE\n");
+        fprintf(stderr, "FAILED TO START COSTMAP SERVER PIPE\n");
     }
 
     if (pipe_server_create(MESH_CH, mesh_info, flags)){
-        printf("FAILED TO START MESH SERVER PIPE\n");
+        fprintf(stderr, "FAILED TO START MESH SERVER PIPE\n");
     }
 
     if (pipe_server_create(ALIGNED_PTCLOUD_CH, aligned_info, flags)){
-        printf("FAILED TO START ALIGNED PTCLOUD SERVER PIPE\n");
+        fprintf(stderr, "FAILED TO START ALIGNED PTCLOUD SERVER PIPE\n");
     }
 
     if (pipe_server_create(PLAN_CH, plan_info, SERVER_FLAG_EN_CONTROL_PIPE)){
-        printf("FAILED TO START PLAN SERVER PIPE\n");
+        fprintf(stderr, "FAILED TO START PLAN SERVER PIPE\n");
     }
 
     if (pipe_server_create(RENDER_CH, render_info, flags)){
-        printf("FAILED TO START RENDER SERVER PIPE\n");
+        fprintf(stderr, "FAILED TO START RENDER SERVER PIPE\n");
     }
 
     // VIO
@@ -371,9 +373,9 @@ int TsdfServer::initMPA(){
         fprintf(stderr, "ERROR: Invalid pipe name");
         return -1;
     }
-    printf("waiting for server at %s\n", pipe_path);
+    printf("Waiting for server at %s\n", pipe_path);
 
-    printf("waiting for server at %s\n", BODY_WRT_FIXED_POSE_PATH);
+    printf("Waiting for server at %s\n", BODY_WRT_FIXED_POSE_PATH);
 
     pipe_client_open(MPA_POINT_CLOUD_CH, pipe_path, "voxl-mapper",
                                 EN_PIPE_CLIENT_SIMPLE_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT, sizeof(tof_data_t) * 10);
@@ -409,7 +411,8 @@ void TsdfServer::closeMPA(){
 void TsdfServer::integratePointcloud(const Transformation &T_G_C, const Pointcloud &ptcloud_C, const Colors &colors,
                                      const bool is_freespace_pointcloud){
     if (ptcloud_C.size() != colors.size()){
-        fprintf(stderr, "Pointcloud and Colors are not of the same size: %s\n", __FUNCTION__);
+        fprintf(stderr, "ERROR Pointcloud and Colors are not of the same size\n");
+        return;
     }
     tsdf_integrator_->integratePointCloud(T_G_C, ptcloud_C, colors, is_freespace_pointcloud);
 }
@@ -545,8 +548,8 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         server->updateEsdf(true);
 
-        fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
-        fprintf(stderr, "using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
+        if (server->en_debug) fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
+        if (server->en_debug) fprintf(stderr, "using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
 
         pthread_mutex_unlock(&pose_mutex); // return mutex lock
         server->maiRRT(start_pose, goal_pose, server->getEsdfMapPtr(), &(server->path_to_follow));
@@ -645,7 +648,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
 
-        start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
+        start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z() - 0.5;
 
         char* goal_ptr;
         goal_ptr = strtok (string, ":");
@@ -666,8 +669,11 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         server->updateEsdf(true);
 
-        fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
-        fprintf(stderr, "using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
+        if (server->en_debug){
+            fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
+            fprintf(stderr, "using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
+        }
+
 
         pthread_mutex_unlock(&pose_mutex); // return mutex lock
         server->maiRRT( start_pose, goal_pose, server->getEsdfMapPtr(), &(server->path_to_follow));
@@ -689,9 +695,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 }
 
 bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, std::shared_ptr<EsdfMap> esdf_map_ptr, mav_trajectory_generation::Trajectory* path_to_follow){
-    RRTSTAR* path_gen = new RRTSTAR(start_pose, goal_pose, esdf_map_ptr);
-
-    if (en_debug) fprintf(stderr, "STARTING SOLVE\n");
+    RRTSTAR* path_gen = new RRTSTAR(start_pose, goal_pose, esdf_map_ptr, en_debug, en_timing);
 
     path_gen->Solve(path_to_follow);
 
@@ -745,13 +749,13 @@ bool TsdfServer::followPath()
 
     if (!mav_trajectory_generation::trajectoryToPolynomialTrajectoryMsg(
         path_to_follow, &msg)){
-            fprintf(stderr, "CONVERSION FAILED\n");
+            fprintf(stderr, "ERROR Traj conversion failed\n");
             return false;
     }
 
     trajectory_t out;
     if (msg.segments.size() > TRAJ_MAX_SEGMENTS){
-        printf("Path segments too long\n");
+        fprintf(stderr, "ERROR Path segments too long\n");
         return false;
     }
     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
@@ -760,7 +764,7 @@ bool TsdfServer::followPath()
 
     for(int i = 0; i < msg.segments.size(); i++){
         if (msg.segments[i].num_coeffs > TRAJ_MAX_COEFFICIENTS){
-            printf("Path coefficients too large\n");
+            fprintf(stderr, "ERROR Path coefficients too large\n");
             return false;
         }
         out.segments[i].n_coef = msg.segments[i].num_coeffs;
@@ -774,10 +778,13 @@ bool TsdfServer::followPath()
             if (en_debug) fprintf(stderr, "segment %d-> x: %6.5f, y: %6.5f, z: %6.5f\n", i, out.segments[i].cx[j], out.segments[i].cy[j], out.segments[i].cz[j]);
         }
     }
-    printf("sending trajectory to plan channel\n");
+    printf("Sending trajectory to plan channel\n");
     pipe_server_write(PLAN_CH, (char*)&out, sizeof(trajectory_t));
+
     // need this to start as a background thread
-    collision_thread_worker();
+    if (collision_check_thread.joinable()) collision_check_thread.join();
+    collision_check_thread = std::thread(&TsdfServer::collision_thread_worker, this);
+
     return true;
 }
 
@@ -787,7 +794,6 @@ bool TsdfServer::checkPoseForCollision(Eigen::Vector3d pose)
     if (!(esdf_map_->getDistanceAtPosition(pose, false, &distance))) {
         return false; // no collision, area is technically unknown
     }
-    fprintf(stderr, "DISTANCE TO OBSTACLE: %6.2f\n", distance);
     return (distance < robot_radius && distance > 0.0); // true if collision, false otherwise
 }
 
@@ -797,8 +803,11 @@ void TsdfServer::collision_thread_response(Eigen::Vector3d goal_pose)
     pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
     start_pose << curr_pose.x(), curr_pose.y(), curr_pose.z();
     pthread_mutex_unlock(&pose_mutex); // free mutex
+    collision_check_thread.join();
 
+    planning = true;
     maiRRT(start_pose, goal_pose, getEsdfMapPtr(), &path_to_follow);
+    planning = false;
 }
 
 void TsdfServer::collision_thread_worker()
@@ -806,20 +815,20 @@ void TsdfServer::collision_thread_worker()
     rc_tf_t latest_pose;
     int64_t thread_start_ns = rc_nanos_monotonic_time();
     int64_t total_runtime_ns = path_to_follow.getMaxTime() * 1000000000.0;
-    
+
     // this gives us our nice pre-chopped states to check for collisions in
     mav_msgs::EigenTrajectoryPoint::Vector states;
-    sampleWholeTrajectory(path_to_follow, 0.05, &states);
+    sampleWholeTrajectory(path_to_follow, 0.10, &states);
 
     // main loop
     int last_ind = 0;
     double least_dist = DBL_MAX;
-    while (rc_nanos_monotonic_time() - thread_start_ns > total_runtime_ns) // not sure what the end condition would be
+    while (rc_nanos_monotonic_time() - thread_start_ns < total_runtime_ns) // not sure what the end condition would be
     {
         // for each position update, I want it. Grab the tf at each position, xyz coords and use that
         int ret = rc_tf_ringbuf_get_tf_at_time(&buf, rc_nanos_monotonic_time(), &latest_pose);
         if (ret < 0){
-            fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
+            fprintf(stderr, "ERROR Failed to fetch from ringbuffer\n");
             continue;
         }
 
@@ -829,13 +838,13 @@ void TsdfServer::collision_thread_worker()
         bool minima = false;
         int minimia_fails = 0;
         for (int i = last_ind; i < states.size(); i++){
-            // LOGIC: check each state, and once we have a state that is "close enough" to our current (i.e. < 0.05m dif), store it. 
+            // LOGIC: check each state, and once we have a state that is "close enough" to our current (i.e. < 0.05m dif), store it.
             // Check the 5? states following, if they don't get any closer exit loop
             double d = (states[i].position_W - last_pose).norm();
             if (minima){
                 if (d >= least_dist){
                     minimia_fails++;
-                    if (minimia_fails >= 3) break; 
+                    if (minimia_fails >= 5) break;
                 }
                 else {
                     minimia_fails = 0;
@@ -850,21 +859,19 @@ void TsdfServer::collision_thread_worker()
             }
         }
 
-        std::cout << "Selected State: " << states[last_ind].position_W << std::endl;
-        std::cout << "Distance between states: " << (states[last_ind].position_W - last_pose).norm() << std::endl;
-
         for (int i = last_ind; i < states.size(); i++){
             if (checkPoseForCollision(states[i].position_W)){
-                fprintf(stderr, "COLLISION IMMINENT. EXITING\n");
-                std::cout << "Collision State: " << states[i].position_W << std::endl;
+                fprintf(stderr, "COLLISION IMMINENT. HALTING PATH AND REPLANNING\n");
                 // send estop packet here, once traj_int stuff is merged in
 
                 // then fire up response thread
                 collision_response_thread = std::thread(&TsdfServer::collision_thread_response, this, std::ref(states.back().position_W));
+                total_runtime_ns = 0;
                 return;
             }
         }
         // otherwise, just continue the loop until we're done OR the traj is finished by time
+        usleep(1000000/15);
     }
 }
 
@@ -883,22 +890,20 @@ bool TsdfServer::loadMap(std::string tsdf_path, std::string esdf_path)
     bool tsdf_loaded = LoadBlocksFromFile(
         tsdf_path, Layer<TsdfVoxel>::BlockMergingStrategy::kReplace,
         mult_layer_support, tsdf_map_->getTsdfLayerPtr());
-    if (tsdf_loaded){
-        printf("Successfully loaded TSDF layer.\n");
-    }
-    else return false;
 
     bool esdf_loaded = LoadBlocksFromFile(
         esdf_path, Layer<EsdfVoxel>::BlockMergingStrategy::kReplace,
         mult_layer_support, esdf_map_->getEsdfLayerPtr());
+
+    costmap_updates_only = false;
+    planning = false;
+
     if (esdf_loaded){
         printf("Successfully loaded ESDF layer.\n");
     }
-    costmap_updates_only = false;
-    // updateEsdf(false);
-    usleep(250000);
-    planning = false;
-
+    if (tsdf_loaded){
+        printf("Successfully loaded TSDF layer.\n");
+    }
     return (tsdf_loaded && esdf_loaded);
 }
 

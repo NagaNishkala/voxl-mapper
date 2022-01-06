@@ -7,9 +7,6 @@
 #include <iostream>
 #include <fstream>
 
-#define RRT_VERSION "0.0.2"
-#define BENCHMARK_FILE "/data/voxl_mapper/benchmark.csv"
-
 #define END_DIST_THRESHOLD 0.75
 #define SINGLE_GRID_CAPACITY 16
 
@@ -27,7 +24,7 @@ typedef struct Node {
 class RRTSTAR
 {
 public:
-    RRTSTAR(Eigen::Vector3d startPos, Eigen::Vector3d endPos, shared_ptr<voxblox::EsdfMap> esdf_map_);
+    RRTSTAR(Eigen::Vector3d startPos, Eigen::Vector3d endPos, shared_ptr<voxblox::EsdfMap> esdf_map_, bool en_debug_, bool en_timing_);
 
     /// solves RRT*, generates rough waypoint path
     void Solve(mav_trajectory_generation::Trajectory* last_trajectory_);
@@ -43,6 +40,10 @@ public:
     vector<Node *> path;
     /// smoothed loco path
     mav_msgs::EigenTrajectoryPointVector loco_path;
+
+    // print modes
+    bool en_debug = false;
+    bool en_timing = false;
 
 private:
     /// sets the lower and upper bounds for the problem, also sets up our "grids"

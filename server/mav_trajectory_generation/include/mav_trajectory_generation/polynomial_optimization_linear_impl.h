@@ -369,7 +369,7 @@ bool PolynomialOptimization<_N>::solveLinear() {
     }
     // Catch the fully constrained case:
     if (n_free_constraints_ == 0) {
-        std::cout << "No free constraints set in the vertices. Polynomial can not be optimized. Outputting fully constrained polynomial." << std::endl;
+        // std::cout << "Polynomial can not be optimized. Outputting fully constrained polynomial." << std::endl;
         updateSegmentsFromCompactConstraints();
         return true;
     }

@@ -106,7 +106,7 @@ static int _parse_opts(int argc, char* argv[])
 int main(int argc, char** argv) {
     if(_parse_opts(argc, argv)) return -1;
 
-	printf("Loading our own config file\n");
+	printf("Loading our config file\n");
     if(config_file_read()) return -1;
     if (en_debug) config_file_print();
 
@@ -140,10 +140,9 @@ int main(int argc, char** argv) {
 
     voxblox::MeshIntegratorConfig mesh_config;
 
-    printf("Trying to init tsdf server\n");
     // initialize tsdf server
     voxblox::TsdfServer tsdf_server(map_config, int_config, mesh_config, en_debug, en_timing);
-    printf("created tsdf server\n");
+
 	// indicate to the soon-to-be-started thread that we are initialized
 	// and running, this is an extern variable in start_stop.c
     main_running = 1;
