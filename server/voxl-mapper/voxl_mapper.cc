@@ -296,7 +296,7 @@ int TsdfServer::initMPA(){
     pipe_info_t costmap_info = { \
         COSTMAP_NAME,
         COSTMAP_LOCATION,
-        "point_cloud_metadata_t",
+        "costmap",
         PROCESS_NAME,
         1024*1024*64,
         0
@@ -332,7 +332,7 @@ int TsdfServer::initMPA(){
     pipe_info_t render_info = { \
         RENDER_NAME,
         RENDER_LOCATION,
-        "point_cloud_metadata_t",
+        "js_render",
         PROCESS_NAME,
         1024*1024*64,
         0
