@@ -126,7 +126,7 @@ The default options are setup for a ModalAi Seeker Drone equipped with a VOXL Ti
 voxl-portal is equipped with viewing capabilities for all outputs of voxl-mapper. To read voxl-portal docs, visit [here](https://docs.modalai.com/voxl-portal/).
 | :exclamation:  NOTE   |
 |:---------------------------|
-| voxl-portal must be installed directly from the  latest mapping_v*.\*.* tag on [gitlab](https://gitlab.com/voxl-public/modal-pipe-architecture/voxl-portal/-/tags) or via the [plot branch](https://gitlab.com/voxl-public/modal-pipe-architecture/voxl-portal/-/tree/plot) for the latest development updates     |
+| voxl-portal must be installed from the dev opkg repo OR via the [plot branch](https://gitlab.com/voxl-public/modal-pipe-architecture/voxl-portal/-/tree/plot) for the latest development updates     |
 
 In order to view in voxl-portal, select the Map tab from the options in the top right.
 ![map_menu.png](/images/map_menu.png)
