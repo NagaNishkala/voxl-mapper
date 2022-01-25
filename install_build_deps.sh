@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # list all your dependencies here
-DEPS="libmodal_json openmp libvoxl_cutils ceres-solver nlopt voxl-mpa-tools libmodal_pipe voxblox"
+DEPS="libmodal-json openmp libvoxl-cutils ceres-solver nlopt voxl-mpa-tools libmodal-pipe voxblox"
 
 
 # variables
