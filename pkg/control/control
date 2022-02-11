@@ -3,7 +3,7 @@ Version: 0.0.3
 Section: base
 Priority: optional
 Architecture: all
-Depends: libmodal-json, openmp, libvoxl-cutils, ceres-solver, nlopt, voxl-mpa-tools, libmodal-pipe, voxblox
+Depends: libmodal-json, libvoxl-cutils, ceres-solver, nlopt, voxl-mpa-tools, libmodal-pipe, voxblox
 Conflicts:
 Maintainer: matt.turi@modalai.com
 Description: voxl-mapper
