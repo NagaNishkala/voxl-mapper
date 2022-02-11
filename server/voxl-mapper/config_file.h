@@ -43,7 +43,14 @@
 #define CONF_FILE "/etc/modalai/voxl-mapper.conf"
 #define BUF_LEN 64
 
+enum depth_modes {
+    tof = 0,
+    dfs
+};
+
 // *ALL DISTANCES/SIZES ARE IN METERS* //
+extern int depth_mode;
+
 extern double robot_radius;
 extern float voxel_size;
 extern int voxels_per_side;
@@ -76,7 +83,7 @@ extern bool loco_split_at_collisions;
 extern bool loco_resample_trajectory;
 extern bool loco_verbose;
 
-extern rc_tf_t tf_tof_wrt_body;
+extern rc_tf_t tf_cam_wrt_body;
 
 // read only our own config file without printing the contents
 int config_file_read(void);
@@ -85,7 +92,7 @@ int config_file_read(void);
 int config_file_print(void);
 
 // load the common extrinsics config files
-// prints tof_wrt_body matrix if debug=true
-int load_extrinsics_file(bool debug);
+// prints cam_wrt_body matrix if debug=true
+int load_extrinsics_file(bool debug, depth_modes dmode);
 
 #endif // end #define CONFIG_FILE_H

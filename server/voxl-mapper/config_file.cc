@@ -39,10 +39,13 @@
 #define CONFIG_FILE_HEADER "\
 /**\n\
  * This file contains configuration that's specific to voxl-mapper.\n\
+ * depth_mode = 0 for tof input or 1 for dfs input.\n\
  */\n"
 
 
 // define all the "Extern" variables from config_file.h
+int depth_mode;
+
 double robot_radius;
 float voxel_size;
 int voxels_per_side;
@@ -75,9 +78,9 @@ bool loco_split_at_collisions;
 bool loco_resample_trajectory;
 bool loco_verbose;
 
-rc_tf_t tf_tof_wrt_body;
+rc_tf_t tf_cam_wrt_body;
 
-int load_extrinsics_file(bool debug)
+int load_extrinsics_file(bool debug, depth_modes dmode)
 {
 	vcc_extrinsic_t t[VCC_MAX_EXTRINSICS_IN_CONFIG];
 	vcc_extrinsic_t tmp;
@@ -85,24 +88,44 @@ int load_extrinsics_file(bool debug)
 	// now load in extrinsics
 	int n_extrinsics;
 	if(vcc_read_extrinsic_conf_file(VCC_EXTRINSICS_PATH, t, &n_extrinsics, VCC_MAX_EXTRINSICS_IN_CONFIG)){
+		fprintf(stderr, "ERROR: Unable to read extrinsics conf at %s\n", VCC_EXTRINSICS_PATH);
 		return -1;
 	}
 
-	// Pick out IMU to Body. if QVIO uses a different imu then this will get updated later
-	if(vcc_find_extrinsic_in_array("body", "tof", t, n_extrinsics, &tmp)){
-		fprintf(stderr, "ERROR: %s missing tof to body transform\n", VCC_EXTRINSICS_PATH);
-		return -1;
-	}
-    if (debug) printf("tof_wrt_body:\n");
-	for(int j=0; j<3; j++){
-		for(int k=0; k<4; k++){
-            if (k==3) tf_tof_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
-			else tf_tof_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
-            if (debug) printf("%6.3f ", tf_tof_wrt_body.d[j][k]);
+	// Pick out Cam to Body. Can be stereo_l or tof
+	if (dmode == tof){
+		if(vcc_find_extrinsic_in_array("body", "tof", t, n_extrinsics, &tmp)){
+			fprintf(stderr, "ERROR: %s missing tof to body transform\n", VCC_EXTRINSICS_PATH);
+			return -1;
 		}
-        if (debug) printf("\n");
+		if (debug) printf("tof_wrt_body:\n");
+		for(int j=0; j<3; j++){
+			for(int k=0; k<4; k++){
+				if (k==3) tf_cam_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
+				else tf_cam_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
+				if (debug) printf("%6.3f ", tf_cam_wrt_body.d[j][k]);
+			}
+			if (debug) printf("\n");
+		}
+		if (debug) printf("\n");
 	}
-    if (debug) printf("\n");
+	else if (dmode == dfs){
+		if(vcc_find_extrinsic_in_array("body", "stereo_l", t, n_extrinsics, &tmp)){
+			fprintf(stderr, "ERROR: %s missing stereo_l to body transform\n", VCC_EXTRINSICS_PATH);
+			return -1;
+		}
+		if (debug) printf("stereo_wrt_body:\n");
+		for(int j=0; j<3; j++){
+			for(int k=0; k<4; k++){
+				if (k==3) tf_cam_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
+				else tf_cam_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
+				if (debug) printf("%6.3f ", tf_cam_wrt_body.d[j][k]);
+			}
+			if (debug) printf("\n");
+		}
+		if (debug) printf("\n");
+	}
+
 	return 0;
 }
 
@@ -115,6 +138,7 @@ int load_extrinsics_file(bool debug)
  */
 int config_file_print(void){
     printf("=================================================================\n");
+	printf("depth_mode:                       %s\n", depth_mode == 0 ? "tof" : "dfs");
     printf("============================GENERAL==============================\n");
     printf("robot_radius:                     %0.3f\n", robot_radius);
     printf("voxel_size:                       %0.3f\n", (double)voxel_size);
@@ -164,6 +188,8 @@ int config_file_read(void)
 
 	cJSON* parent = json_read_file(CONF_FILE);
 	if(parent==NULL) return -1;
+
+    json_fetch_int_with_default(parent, "depth_mode", &depth_mode, 0);
 
 	json_fetch_double_with_default(parent, "robot_radius", &robot_radius, 0.3);
 	json_fetch_float_with_default(parent, "voxel_size", &voxel_size, 0.2);

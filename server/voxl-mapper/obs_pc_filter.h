@@ -43,6 +43,9 @@
  *
  * @return     0 on success, -1 on failure
  */
-int obs_pc_downsample(int n, const float in[][3], const uint8_t* conf, float max_depth, float cell_size, int threshold, voxblox::Pointcloud* out);
+int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, float max_depth, float cell_size, int threshold, voxblox::Pointcloud* out);
+
+int dfs_pc_downsample(int n, const float in[][3], float max_depth, float cell_size, int threshold, voxblox::Pointcloud* out);
+
 
 #endif // OBS_PC_FILTER_H

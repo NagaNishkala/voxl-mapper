@@ -8,6 +8,7 @@
 #include "voxl_cutils.h"
 #include "mesh_vis.h"
 #include "rc_transform_ringbuf.h"
+#include "config_file.h"
 
 namespace voxblox
 {
@@ -18,7 +19,7 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::Config &integrator_config,
-                const MeshIntegratorConfig &mesh_config, bool debug, bool timing);
+                const MeshIntegratorConfig &mesh_config, bool debug, bool timing, depth_modes _dmode);
     virtual ~TsdfServer() {}
 
     // rrt planner
@@ -33,7 +34,7 @@ public:
     static void _vio_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, __attribute__((unused)) void *context);
     static void _vio_disconnect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context);
     static void _control_pipe_cb(__attribute__((unused)) int ch, char* string, int bytes, __attribute__((unused)) void* context);
-
+    static void _stereo_pc_helper_cb(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
     /// general mpa
     int initMPA();
     void closeMPA();
@@ -71,6 +72,7 @@ public:
     // general public params
     bool en_debug;
     bool en_timing;
+    depth_modes dmode;
 
 protected:
     /// boolean showing if we are planning, used to stop other background processes

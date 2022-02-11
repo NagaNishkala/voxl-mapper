@@ -1,6 +1,5 @@
 #include "voxl_mapper.h"
 #include "conversions.h"
-#include "config_file.h"
 #include "mesh_vis.h"
 #include "ptcloud_vis.h"
 #include "rrt.h"
@@ -65,7 +64,7 @@ rc_tfv_ringbuf_t buf = RC_TF_RINGBUF_INITIALIZER;
 namespace voxblox {
 
 TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::Config &integrator_config,
-                       const MeshIntegratorConfig &mesh_config, bool debug, bool timing){
+                       const MeshIntegratorConfig &mesh_config, bool debug, bool timing, depth_modes _dmode){
 
     tsdf_map_.reset(new TsdfMap(config));
     // fast, merged, or simple
@@ -80,12 +79,20 @@ TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::
 
     en_debug = debug;
     en_timing = timing;
+    dmode = _dmode;
     costmap_updates_only = false;
 
-    // callbacks MPA
-    pipe_client_set_simple_helper_cb(MPA_POINT_CLOUD_CH, _pc_helper_cb, this);
-    pipe_client_set_connect_cb(MPA_POINT_CLOUD_CH, _pc_connect_cb, this);
-    pipe_client_set_disconnect_cb(MPA_POINT_CLOUD_CH, _pc_disconnect_cb, this);
+    // point cloud cbs
+    if (dmode == tof){
+        pipe_client_set_simple_helper_cb(MPA_POINT_CLOUD_CH, _pc_helper_cb, this);
+        pipe_client_set_connect_cb(MPA_POINT_CLOUD_CH, _pc_connect_cb, this);
+        pipe_client_set_disconnect_cb(MPA_POINT_CLOUD_CH, _pc_disconnect_cb, this);
+    }
+    else if (dmode == dfs){
+        pipe_client_set_point_cloud_helper_cb(MPA_POINT_CLOUD_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_connect_cb(MPA_POINT_CLOUD_CH, _pc_connect_cb, this);
+        pipe_client_set_disconnect_cb(MPA_POINT_CLOUD_CH, _pc_disconnect_cb, this);
+    }
 
     pipe_server_set_available_control_commands(PLAN_CH, CONTROL_COMMANDS);
     pipe_server_set_control_cb(PLAN_CH, _control_pipe_cb, this);
@@ -98,7 +105,7 @@ uint64_t TsdfServer::rc_nanos_monotonic_time(){
 }
 
 void TsdfServer::_pc_connect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context){
-    printf("Connected to TOF server\n");
+    printf("Connected to depth pipe\n");
     return;
 }
 
@@ -147,14 +154,14 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     voxblox::Pointcloud ptcloud;
     voxblox::Colors _colors;
 
-    obs_pc_downsample(MPA_TOF_SIZE, tof_data.points, tof_data.confidences, 4.0, 0.15, 4, &ptcloud);
+    tof_pc_downsample(MPA_TOF_SIZE, tof_data.points, tof_data.confidences, 4.0, 0.15, 4, &ptcloud);
     _colors.resize(ptcloud.size());
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // now combine tfs
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     rc_tf_t tf_tof_wrt_fixed;
-    rc_tf_combine_two(tf_body_wrt_fixed, tf_tof_wrt_body, &tf_tof_wrt_fixed);
+    rc_tf_combine_two(tf_body_wrt_fixed, tf_cam_wrt_body, &tf_tof_wrt_fixed);
 
     Eigen::Matrix<float, 4, 4> mat_tof_to_fixed;
     mat_tof_to_fixed << tf_tof_wrt_fixed.d[0][0], tf_tof_wrt_fixed.d[0][1], tf_tof_wrt_fixed.d[0][2], tf_tof_wrt_fixed.d[0][3],
@@ -257,6 +264,155 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     mesh_timer++;
     return;
 }
+
+void TsdfServer::_stereo_pc_helper_cb(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    //class instance
+    TsdfServer *server = (TsdfServer *)context;
+
+    if (server->planning) return;
+
+    static int mesh_timer = 1;
+    //check if falling behind
+    if (pipe_client_bytes_in_pipe(MPA_POINT_CLOUD_CH) > 0){
+        fprintf(stderr, "WARNING bytes left in tof point cloud pipe\n");
+    }
+
+       // tof_data_t tof_data = data_array[n_packets - 1];
+    float new_data [meta.n_points][3];
+    memcpy( new_data, data, sizeof(float) * meta.n_points * 3);
+    int64_t curr_ts = meta.timestamp_ns;
+
+    rc_tf_t tf_body_wrt_fixed = RC_TF_INITIALIZER;
+    int ret = rc_tf_ringbuf_get_tf_at_time(&buf, curr_ts, &tf_body_wrt_fixed);
+    if (ret < 0){
+        fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
+        if (ret == -2){
+            printf("there wasn't sufficient data in the buffer\n");
+        }
+        if (ret == -3){
+            printf("the requested timestamp was too new\n");
+        }
+        if (ret == -4){
+            printf("the requested timestamp was too old\n");
+        }
+        return;
+    }
+
+    // setup our voxblox structs for pointcloud and colors
+    voxblox::Pointcloud ptcloud;
+    voxblox::Colors _colors;
+
+    dfs_pc_downsample(meta.n_points, new_data, 4.0, 0.08, 3, &ptcloud);
+    _colors.resize(ptcloud.size());
+
+   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // now combine tfs
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    rc_tf_t tf_tof_wrt_fixed;
+    rc_tf_combine_two(tf_body_wrt_fixed, tf_cam_wrt_body, &tf_tof_wrt_fixed);
+
+    Eigen::Matrix<float, 4, 4> mat_tof_to_fixed;
+    mat_tof_to_fixed << tf_tof_wrt_fixed.d[0][0], tf_tof_wrt_fixed.d[0][1], tf_tof_wrt_fixed.d[0][2], tf_tof_wrt_fixed.d[0][3],
+        tf_tof_wrt_fixed.d[1][0], tf_tof_wrt_fixed.d[1][1], tf_tof_wrt_fixed.d[1][2], tf_tof_wrt_fixed.d[1][3],
+        tf_tof_wrt_fixed.d[2][0], tf_tof_wrt_fixed.d[2][1], tf_tof_wrt_fixed.d[2][2], tf_tof_wrt_fixed.d[2][3],
+        0.0, 0.0, 0.0, 1.0;
+
+    const voxblox::Transformation vb_tof_to_fixed(mat_tof_to_fixed);
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // DEBUG - aligned pointcloud
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    voxblox::Pointcloud _pub_ptcloud;
+    voxblox::transformPointcloud(vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
+
+    point_cloud_metadata_t aligned_ptc_meta;
+    aligned_ptc_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
+    aligned_ptc_meta.timestamp_ns = server->rc_nanos_monotonic_time();
+    aligned_ptc_meta.n_points = ptcloud.size();
+    aligned_ptc_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
+
+    pipe_server_write_point_cloud(ALIGNED_PTCLOUD_CH, aligned_ptc_meta, _pub_ptcloud.data());
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // pointcloud gradient coloring
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    for (int i=0; i<ptcloud.size();  i++){
+        float height = _pub_ptcloud[i].z();
+
+        //floating point modulus
+        int mod = 0;
+        int intheight = (int)height;
+        while((mod+1)*RAINBOW_REPEAT_DIST <= intheight) mod++;
+        while((mod)  *RAINBOW_REPEAT_DIST > intheight) mod--;
+
+        height -= mod*RAINBOW_REPEAT_DIST;
+        height /= RAINBOW_REPEAT_DIST;
+
+        float a=height*5;
+        int X=(int)(a);
+        int Y=(int)(255*(a-X));
+        int r,g,b;
+        switch(X)
+        {
+            case 0: r=255;g=Y;b=0;break;
+            case 1: r=255-Y;g=255;b=0;break;
+            case 2: r=0;g=255;b=Y;break;
+            case 3: r=0;g=255-Y;b=255;break;
+            case 4: r=Y;g=0;b=255;break;
+            case 5: r=255;g=0;b=255;break;
+        }
+
+        _colors[i].r = r;
+        _colors[i].g = g;
+        _colors[i].b = b;
+        _colors[i].a = 127;
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // drone position
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    Eigen::Vector3d _curr_pose;
+    _curr_pose << tf_tof_wrt_fixed.d[0][3], tf_tof_wrt_fixed.d[1][3], tf_tof_wrt_fixed.d[2][3];
+    pthread_mutex_lock(&pose_mutex);
+    server->curr_pose = _curr_pose;
+    pthread_mutex_unlock(&pose_mutex);
+
+    // PHEW, finally, send in the point cloud to TSDF
+    uint64_t start_time = server->rc_nanos_monotonic_time();
+    server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
+    uint64_t end_time = server->rc_nanos_monotonic_time();
+
+    if (server->en_timing){
+        printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
+    }
+
+    if (mesh_timer % 12 == 0){
+        mesh_timer = 0;
+        if (!server->planning){
+            server->updateMesh();
+            // ***WARN***
+            // cannot update the esdf map when it is being used for collision checking in the planner
+            // after a path plan completes, updating the esdf map will take SIGNIFICANTLY longer after
+            // multiple skipped updates
+            // **********
+            server->updateEsdf(true);
+            server->publish2DCostmap();
+        }
+    }
+
+    // clear small sphere (0.2m radius) around our drones pose in the esdf map
+    start_time = server->rc_nanos_monotonic_time();
+    server->esdf_integrator_->addNewRobotPosition(Point(_curr_pose.x(), _curr_pose.y(), _curr_pose.z()));
+    end_time = server->rc_nanos_monotonic_time();
+    if (server->en_timing){
+        printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
+    }
+    mesh_timer++;
+    return;
+}
+
 
 void TsdfServer::_pc_disconnect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context){
     fprintf(stderr, "\r" CLEAR_LINE FONT_BLINK "Disconnected from Ptcloud server\n" RESET_FONT);
@@ -365,20 +521,34 @@ int TsdfServer::initMPA(){
 
     char pipe_path[MODAL_PIPE_MAX_PATH_LEN];
 
-    // request a new pipe from the server
-    if (pipe_expand_location_string("tof", pipe_path) < 0){
-        fprintf(stderr, "ERROR: Invalid pipe name");
-        return -1;
-    }
-    printf("waiting for server at %s\n", pipe_path);
-
     printf("waiting for server at %s\n", BODY_WRT_FIXED_POSE_PATH);
 
-    pipe_client_open(MPA_POINT_CLOUD_CH, pipe_path, "voxl-mapper",
-                                EN_PIPE_CLIENT_SIMPLE_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT, sizeof(tof_data_t) * 10);
-    pipe_client_open(MPA_VVPX4_CH, BODY_WRT_FIXED_POSE_PATH, "voxl-mapper",
+    pipe_client_open(MPA_VVPX4_CH, BODY_WRT_FIXED_POSE_PATH, PROCESS_NAME,
                                 EN_PIPE_CLIENT_SIMPLE_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
                                 POSE_6DOF_RECOMMENDED_READ_BUF_SIZE);
+
+    // request a new pipe from the server
+    if (dmode == tof){
+        if (pipe_expand_location_string("tof", pipe_path) < 0){
+            fprintf(stderr, "ERROR: Invalid pipe name");
+            return -1;
+        }
+        printf("waiting for server at %s\n", pipe_path);
+        pipe_client_open(MPA_POINT_CLOUD_CH, pipe_path, PROCESS_NAME,
+                         EN_PIPE_CLIENT_SIMPLE_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
+                         sizeof(tof_data_t) * 10);
+
+    }
+    else if (dmode == dfs){
+        if (pipe_expand_location_string("dfs_point_cloud", pipe_path) < 0){
+            fprintf(stderr, "ERROR: Invalid pipe name");
+            return -1;
+        }
+        printf("waiting for server at %s\n", pipe_path);
+        pipe_client_open(MPA_POINT_CLOUD_CH, pipe_path, PROCESS_NAME,
+                         EN_PIPE_CLIENT_POINT_CLOUD_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
+                         sizeof(tof_data_t) * 10);
+    }
 
     printf("Initializing ESDF structs\n");
 
