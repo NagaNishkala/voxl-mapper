@@ -43,14 +43,38 @@
 #define CONF_FILE "/etc/modalai/voxl-mapper.conf"
 #define BUF_LEN 64
 
-enum depth_modes {
-    tof = 0,
-    dfs
-};
+// INPUTS
+extern char tof_pipe[BUF_LEN];
+extern bool tof_enable;
+extern rc_tf_t tf_tof_wrt_body;
+extern float tof_rate;
+
+extern char depth_pipe_0[BUF_LEN];
+extern bool depth_pipe_0_enable;
+extern rc_tf_t tf_depth0_wrt_body;
+extern char extrinsics0_name[BUF_LEN];
+extern float depth0_rate;
+
+extern char depth_pipe_1[BUF_LEN];
+extern bool depth_pipe_1_enable;
+extern rc_tf_t tf_depth1_wrt_body;
+extern char extrinsics1_name[BUF_LEN];
+extern float depth1_rate;
+
+extern char depth_pipe_2[BUF_LEN];
+extern bool depth_pipe_2_enable;
+extern rc_tf_t tf_depth2_wrt_body;
+extern char extrinsics2_name[BUF_LEN];
+extern float depth2_rate;
+
+extern char depth_pipe_3[BUF_LEN];
+extern bool depth_pipe_3_enable;
+extern rc_tf_t tf_depth3_wrt_body;
+extern char extrinsics3_name[BUF_LEN];
+extern float depth3_rate;
+
 
 // *ALL DISTANCES/SIZES ARE IN METERS* //
-extern int depth_mode;
-
 extern double robot_radius;
 extern float voxel_size;
 extern int voxels_per_side;
@@ -83,8 +107,6 @@ extern bool loco_split_at_collisions;
 extern bool loco_resample_trajectory;
 extern bool loco_verbose;
 
-extern rc_tf_t tf_cam_wrt_body;
-
 // read only our own config file without printing the contents
 int config_file_read(void);
 
@@ -93,6 +115,6 @@ int config_file_print(void);
 
 // load the common extrinsics config files
 // prints cam_wrt_body matrix if debug=true
-int load_extrinsics_file(bool debug, depth_modes dmode);
+int load_extrinsics_file(bool debug);
 
 #endif // end #define CONFIG_FILE_H

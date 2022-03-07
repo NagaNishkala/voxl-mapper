@@ -43,7 +43,11 @@
 #define QVIO_SIMPLE_LOCATION	    MODAL_PIPE_DEFAULT_BASE_DIR "qvio/"
 
 #define MPA_VVPX4_CH       7
-#define MPA_POINT_CLOUD_CH 8
+#define MPA_TOF_CH         8
+#define MPA_DEPTH_0_CH     9
+#define MPA_DEPTH_1_CH     10
+#define MPA_DEPTH_2_CH     11
+#define MPA_DEPTH_3_CH     12
 
 // control stuff
 #define PLAN_HOME       "plan_home"
@@ -58,13 +62,16 @@
 #define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH)
 
 pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t esdf_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t tsdf_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 rc_tfv_ringbuf_t buf = RC_TF_RINGBUF_INITIALIZER;
 
 
 namespace voxblox {
 
 TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::Config &integrator_config,
-                       const MeshIntegratorConfig &mesh_config, bool debug, bool timing, depth_modes _dmode){
+                       const MeshIntegratorConfig &mesh_config, bool debug, bool timing){
 
     tsdf_map_.reset(new TsdfMap(config));
     // fast, merged, or simple
@@ -79,19 +86,33 @@ TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::
 
     en_debug = debug;
     en_timing = timing;
-    dmode = _dmode;
     costmap_updates_only = false;
 
-    // point cloud cbs
-    if (dmode == tof){
-        pipe_client_set_simple_helper_cb(MPA_POINT_CLOUD_CH, _pc_helper_cb, this);
-        pipe_client_set_connect_cb(MPA_POINT_CLOUD_CH, _pc_connect_cb, this);
-        pipe_client_set_disconnect_cb(MPA_POINT_CLOUD_CH, _pc_disconnect_cb, this);
+    // tof has a seperate cb over regular depth ptc
+    if (tof_enable){
+        pipe_client_set_simple_helper_cb(MPA_TOF_CH, _pc_helper_cb, this);
+        pipe_client_set_connect_cb(MPA_TOF_CH, _pc_connect_cb, this);
+        pipe_client_set_disconnect_cb(MPA_TOF_CH, _pc_disconnect_cb, this);
     }
-    else if (dmode == dfs){
-        pipe_client_set_point_cloud_helper_cb(MPA_POINT_CLOUD_CH, _stereo_pc_helper_cb, this);
-        pipe_client_set_connect_cb(MPA_POINT_CLOUD_CH, _pc_connect_cb, this);
-        pipe_client_set_disconnect_cb(MPA_POINT_CLOUD_CH, _pc_disconnect_cb, this);
+    if (depth_pipe_0_enable){
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_0_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_connect_cb(MPA_DEPTH_0_CH, _pc_connect_cb, this);
+        pipe_client_set_disconnect_cb(MPA_DEPTH_0_CH, _pc_disconnect_cb, this);
+    }
+    if (depth_pipe_1_enable){
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_1_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_connect_cb(MPA_DEPTH_1_CH, _pc_connect_cb, this);
+        pipe_client_set_disconnect_cb(MPA_DEPTH_1_CH, _pc_disconnect_cb, this);
+    }
+    if (depth_pipe_2_enable){
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_2_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_connect_cb(MPA_DEPTH_2_CH, _pc_connect_cb, this);
+        pipe_client_set_disconnect_cb(MPA_DEPTH_2_CH, _pc_disconnect_cb, this);
+    }
+    if (depth_pipe_3_enable){
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_3_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_connect_cb(MPA_DEPTH_3_CH, _pc_connect_cb, this);
+        pipe_client_set_disconnect_cb(MPA_DEPTH_3_CH, _pc_disconnect_cb, this);
     }
 
     pipe_server_set_available_control_commands(PLAN_CH, CONTROL_COMMANDS);
@@ -104,22 +125,104 @@ uint64_t TsdfServer::rc_nanos_monotonic_time(){
     return ((uint64_t)ts.tv_sec * 1000000000) + ts.tv_nsec;
 }
 
+rc_tf_t TsdfServer::get_rc_tf_t(int ch){
+    switch (ch)
+    {
+    case MPA_TOF_CH:
+        return tf_tof_wrt_body;
+
+    case MPA_DEPTH_0_CH:
+        return tf_depth0_wrt_body;
+    
+    case MPA_DEPTH_1_CH:
+        return tf_depth1_wrt_body;
+
+    case MPA_DEPTH_2_CH:
+        return tf_depth2_wrt_body;
+    
+    case MPA_DEPTH_3_CH:
+        return tf_depth3_wrt_body;
+
+    default:
+        fprintf(stderr, "INVALID CHANNEL NUMBER FOR TFS\n");
+        return tf_tof_wrt_body;
+    }
+}
+
+int64_t TsdfServer::get_dif_per_frame(int ch){
+    switch (ch)
+    {
+    case MPA_TOF_CH:
+        return 1000000000/tof_rate;
+
+    case MPA_DEPTH_0_CH:
+        return 1000000000/depth0_rate;
+    
+    case MPA_DEPTH_1_CH:
+        return 1000000000/depth1_rate;
+
+    case MPA_DEPTH_2_CH:
+        return 1000000000/depth2_rate;
+    
+    case MPA_DEPTH_3_CH:
+        return 1000000000/depth3_rate;
+
+    default:
+        fprintf(stderr, "INVALID CHANNEL NUMBER FOR DATA RATE\n");
+        return 1000000000/30.0;
+    }
+}
+
+int TsdfServer::get_index_by_ch(int ch){
+    switch (ch)
+    {
+    case MPA_TOF_CH:
+        return 0;
+
+    case MPA_DEPTH_0_CH:
+        return 1;
+    
+    case MPA_DEPTH_1_CH:
+        return 2;
+
+    case MPA_DEPTH_2_CH:
+        return 3;
+    
+    case MPA_DEPTH_3_CH:
+        return 4;
+
+    default:
+        fprintf(stderr, "INVALID CHANNEL NUMBER FOR INDEX\n");
+        return 0;
+    }
+}
+
 void TsdfServer::_pc_connect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context){
     printf("Connected to depth pipe\n");
     return;
 }
 
 void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context){
+    static int64_t prev_ts = 0;
     //class instance
     TsdfServer *server = (TsdfServer *)context;
 
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
     if (server->planning) return;
 
-    static int mesh_timer = 1;
     //check if falling behind
-    if (pipe_client_bytes_in_pipe(MPA_POINT_CLOUD_CH) > 0){
+    if (pipe_client_bytes_in_pipe(ch) > 0){
         fprintf(stderr, "WARNING bytes left in tof point cloud pipe\n");
     }
+
+    // if we are receiving data too fast, drop it
+    if (prev_ts && server->rc_nanos_monotonic_time() - prev_ts < fixed_ts_dif)
+        return;
+
+    prev_ts = server->rc_nanos_monotonic_time();
 
     // validate data
     int n_packets;
@@ -180,7 +283,7 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
 
     point_cloud_metadata_t aligned_ptc_meta;
     aligned_ptc_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
-    aligned_ptc_meta.timestamp_ns = server->rc_nanos_monotonic_time();
+    aligned_ptc_meta.timestamp_ns = aligned_index;
     aligned_ptc_meta.n_points = ptcloud.size();
     aligned_ptc_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
 
@@ -240,20 +343,6 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
         printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
     }
 
-    if (mesh_timer % 12 == 0){
-        mesh_timer = 0;
-        if (!server->planning){
-            server->updateMesh();
-            // ***WARN***
-            // cannot update the esdf map when it is being used for collision checking in the planner
-            // after a path plan completes, updating the esdf map will take SIGNIFICANTLY longer after
-            // multiple skipped updates
-            // **********
-            server->updateEsdf(true);
-            server->publish2DCostmap();
-        }
-    }
-
     // clear small sphere (0.2m radius) around our drones pose in the esdf map
     start_time = server->rc_nanos_monotonic_time();
     server->esdf_integrator_->addNewRobotPosition(Point(_curr_pose.x(), _curr_pose.y(), _curr_pose.z()));
@@ -261,23 +350,31 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     if (server->en_timing){
         printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
     }
-    mesh_timer++;
     return;
 }
 
 void TsdfServer::_stereo_pc_helper_cb(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static int64_t prev_ts = 0;
     //class instance
     TsdfServer *server = (TsdfServer *)context;
 
     if (server->planning) return;
 
-    static int mesh_timer = 1;
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
     //check if falling behind
-    if (pipe_client_bytes_in_pipe(MPA_POINT_CLOUD_CH) > 0){
+    if (pipe_client_bytes_in_pipe(ch) > 0){
         fprintf(stderr, "WARNING bytes left in tof point cloud pipe\n");
     }
 
-       // tof_data_t tof_data = data_array[n_packets - 1];
+    // if we are receiving data too fast, drop it
+    if (prev_ts && server->rc_nanos_monotonic_time() - prev_ts < fixed_ts_dif)
+        return;
+
+    prev_ts = server->rc_nanos_monotonic_time();
+
     float new_data [meta.n_points][3];
     memcpy( new_data, data, sizeof(float) * meta.n_points * 3);
     int64_t curr_ts = meta.timestamp_ns;
@@ -328,7 +425,7 @@ void TsdfServer::_stereo_pc_helper_cb(__attribute__((unused)) int ch, point_clou
 
     point_cloud_metadata_t aligned_ptc_meta;
     aligned_ptc_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
-    aligned_ptc_meta.timestamp_ns = server->rc_nanos_monotonic_time();
+    aligned_ptc_meta.timestamp_ns = aligned_index;
     aligned_ptc_meta.n_points = ptcloud.size();
     aligned_ptc_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
 
@@ -380,36 +477,26 @@ void TsdfServer::_stereo_pc_helper_cb(__attribute__((unused)) int ch, point_clou
     pthread_mutex_unlock(&pose_mutex);
 
     // PHEW, finally, send in the point cloud to TSDF
+    pthread_mutex_lock(&tsdf_mutex);
     uint64_t start_time = server->rc_nanos_monotonic_time();
     server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
     uint64_t end_time = server->rc_nanos_monotonic_time();
+    pthread_mutex_unlock(&tsdf_mutex);
 
     if (server->en_timing){
         printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
     }
 
-    if (mesh_timer % 12 == 0){
-        mesh_timer = 0;
-        if (!server->planning){
-            server->updateMesh();
-            // ***WARN***
-            // cannot update the esdf map when it is being used for collision checking in the planner
-            // after a path plan completes, updating the esdf map will take SIGNIFICANTLY longer after
-            // multiple skipped updates
-            // **********
-            server->updateEsdf(true);
-            server->publish2DCostmap();
-        }
-    }
-
     // clear small sphere (0.2m radius) around our drones pose in the esdf map
+    pthread_mutex_lock(&esdf_mutex);
     start_time = server->rc_nanos_monotonic_time();
     server->esdf_integrator_->addNewRobotPosition(Point(_curr_pose.x(), _curr_pose.y(), _curr_pose.z()));
     end_time = server->rc_nanos_monotonic_time();
+    pthread_mutex_unlock(&esdf_mutex);
+
     if (server->en_timing){
         printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
     }
-    mesh_timer++;
     return;
 }
 
@@ -519,33 +606,41 @@ int TsdfServer::initMPA(){
     pipe_client_set_connect_cb(MPA_VVPX4_CH, _vio_connect_cb, NULL);
     pipe_client_set_disconnect_cb(MPA_VVPX4_CH, _vio_disconnect_cb, NULL);
 
-    char pipe_path[MODAL_PIPE_MAX_PATH_LEN];
-
     printf("waiting for server at %s\n", BODY_WRT_FIXED_POSE_PATH);
 
     pipe_client_open(MPA_VVPX4_CH, BODY_WRT_FIXED_POSE_PATH, PROCESS_NAME,
                                 EN_PIPE_CLIENT_SIMPLE_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
                                 POSE_6DOF_RECOMMENDED_READ_BUF_SIZE);
 
-    // request a new pipe from the server
-    if (dmode == tof){
-        if (pipe_expand_location_string("tof", pipe_path) < 0){
-            fprintf(stderr, "ERROR: Invalid pipe name");
-            return -1;
-        }
-        printf("waiting for server at %s\n", pipe_path);
-        pipe_client_open(MPA_POINT_CLOUD_CH, pipe_path, PROCESS_NAME,
+    // request these pipes per config file defs
+    if (tof_enable){
+        printf("waiting for server at %s\n", tof_pipe);
+        pipe_client_open(MPA_TOF_CH, tof_pipe, PROCESS_NAME,
                          EN_PIPE_CLIENT_SIMPLE_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
                          sizeof(tof_data_t) * 10);
 
     }
-    else if (dmode == dfs){
-        if (pipe_expand_location_string("dfs_point_cloud", pipe_path) < 0){
-            fprintf(stderr, "ERROR: Invalid pipe name");
-            return -1;
-        }
-        printf("waiting for server at %s\n", pipe_path);
-        pipe_client_open(MPA_POINT_CLOUD_CH, pipe_path, PROCESS_NAME,
+    if (depth_pipe_0_enable){
+        printf("waiting for server at %s\n", depth_pipe_0);
+        pipe_client_open(MPA_DEPTH_0_CH, depth_pipe_0, PROCESS_NAME,
+                         EN_PIPE_CLIENT_POINT_CLOUD_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
+                         sizeof(tof_data_t) * 10);
+    }
+    if (depth_pipe_1_enable){
+        printf("waiting for server at %s\n", depth_pipe_1);
+        pipe_client_open(MPA_DEPTH_1_CH, depth_pipe_1, PROCESS_NAME,
+                         EN_PIPE_CLIENT_POINT_CLOUD_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
+                         sizeof(tof_data_t) * 10);
+    }
+    if (depth_pipe_2_enable){
+        printf("waiting for server at %s\n", depth_pipe_2);
+        pipe_client_open(MPA_DEPTH_2_CH, depth_pipe_2, PROCESS_NAME,
+                         EN_PIPE_CLIENT_POINT_CLOUD_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
+                         sizeof(tof_data_t) * 10);
+    }
+    if (depth_pipe_3_enable){
+        printf("waiting for server at %s\n", depth_pipe_3);
+        pipe_client_open(MPA_DEPTH_3_CH, depth_pipe_3, PROCESS_NAME,
                          EN_PIPE_CLIENT_POINT_CLOUD_HELPER | EN_PIPE_CLIENT_AUTO_RECONNECT,
                          sizeof(tof_data_t) * 10);
     }
@@ -566,11 +661,16 @@ int TsdfServer::initMPA(){
     esdf_map_.reset(new EsdfMap(esdf_map_config));
     esdf_integrator_.reset(new EsdfIntegrator(esdf_int_config, tsdf_map_->getTsdfLayerPtr(), esdf_map_->getEsdfLayerPtr()));
 
+    keep_updating = true;
+    visual_updates_thread = std::thread(&TsdfServer::visual_updates_thread_worker, this);
+
     return 0;
 }
 
 void TsdfServer::closeMPA(){
     printf("Closing Pipes\n");
+    keep_updating = false;
+    if (visual_updates_thread.joinable()) visual_updates_thread.join();
     pipe_client_close_all();
     pipe_server_close_all();
 }
@@ -663,9 +763,7 @@ bool TsdfServer::saveMesh(){
     updateMesh();
 
     if (!str_mesh_save_path.empty()){
-        timing::Timer output_mesh_timer("mesh/output");
         const bool success = outputMeshLayerAsPly(mesh_save_path, *mesh_layer_);
-        output_mesh_timer.Stop();
         if (success){
             printf("Output file as PLY: %s", str_mesh_save_path.c_str());
         }
@@ -675,6 +773,26 @@ bool TsdfServer::saveMesh(){
         return success;
     }
     return false;
+}
+
+void TsdfServer::visual_updates_thread_worker(){
+    static int64_t start_time;
+    while(keep_updating){
+        if (!planning){
+            start_time = rc_nanos_monotonic_time();
+            updateMesh();
+            // ***WARN***
+            // cannot update the esdf map when it is being used for collision checking in the planner
+            // after a path plan completes, updating the esdf map will take SIGNIFICANTLY longer after
+            // multiple skipped updates
+            // **********
+            updateEsdf(true);
+            publish2DCostmap();
+        }
+        // update at most every two seconds for now
+        if ((rc_nanos_monotonic_time() - start_time)/1000 < 2000000)
+            usleep(2000000 - ((rc_nanos_monotonic_time() - start_time)/1000));
+    }
 }
 
 void TsdfServer::clear(){

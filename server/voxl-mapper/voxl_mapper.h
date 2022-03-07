@@ -19,7 +19,7 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::Config &integrator_config,
-                const MeshIntegratorConfig &mesh_config, bool debug, bool timing, depth_modes _dmode);
+                const MeshIntegratorConfig &mesh_config, bool debug, bool timing);
     virtual ~TsdfServer() {}
 
     // rrt planner
@@ -69,10 +69,18 @@ public:
     /// clears map
     virtual void clear();
 
+    /// visual update func
+    void visual_updates_thread_worker();
+
     // general public params
     bool en_debug;
     bool en_timing;
-    depth_modes dmode;
+
+    // helpers
+    rc_tf_t get_rc_tf_t(int ch);
+    int64_t get_dif_per_frame(int ch);
+    int get_index_by_ch(int ch);
+
 
 protected:
     /// boolean showing if we are planning, used to stop other background processes
@@ -101,6 +109,10 @@ protected:
     Eigen::Vector3d curr_pose;
     Eigen::Vector3d start_pose;
     Eigen::Vector3d goal_pose;
+
+    std::thread visual_updates_thread;
+    std::atomic<bool> keep_updating;
+
 
     // paths
     mav_trajectory_generation::Trajectory path_to_follow;

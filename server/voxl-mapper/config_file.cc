@@ -44,7 +44,34 @@
 
 
 // define all the "Extern" variables from config_file.h
-int depth_mode;
+char tof_pipe[BUF_LEN];
+bool tof_enable;
+rc_tf_t tf_tof_wrt_body;
+float tof_rate;
+
+char depth_pipe_0[BUF_LEN];
+bool depth_pipe_0_enable;
+rc_tf_t tf_depth0_wrt_body;
+char extrinsics0_name[BUF_LEN];
+float depth0_rate;
+
+char depth_pipe_1[BUF_LEN];
+bool depth_pipe_1_enable;
+rc_tf_t tf_depth1_wrt_body;
+char extrinsics1_name[BUF_LEN];
+float depth1_rate;
+
+char depth_pipe_2[BUF_LEN];
+bool depth_pipe_2_enable;
+rc_tf_t tf_depth2_wrt_body;
+char extrinsics2_name[BUF_LEN];
+float depth2_rate;
+
+char depth_pipe_3[BUF_LEN];
+bool depth_pipe_3_enable;
+rc_tf_t tf_depth3_wrt_body;
+char extrinsics3_name[BUF_LEN];
+float depth3_rate;
 
 double robot_radius;
 float voxel_size;
@@ -78,9 +105,8 @@ bool loco_split_at_collisions;
 bool loco_resample_trajectory;
 bool loco_verbose;
 
-rc_tf_t tf_cam_wrt_body;
 
-int load_extrinsics_file(bool debug, depth_modes dmode)
+int load_extrinsics_file(bool debug)
 {
 	vcc_extrinsic_t t[VCC_MAX_EXTRINSICS_IN_CONFIG];
 	vcc_extrinsic_t tmp;
@@ -93,7 +119,7 @@ int load_extrinsics_file(bool debug, depth_modes dmode)
 	}
 
 	// Pick out Cam to Body. Can be stereo_l or tof
-	if (dmode == tof){
+	if (tof_enable){
 		if(vcc_find_extrinsic_in_array("body", "tof", t, n_extrinsics, &tmp)){
 			fprintf(stderr, "ERROR: %s missing tof to body transform\n", VCC_EXTRINSICS_PATH);
 			return -1;
@@ -101,25 +127,89 @@ int load_extrinsics_file(bool debug, depth_modes dmode)
 		if (debug) printf("tof_wrt_body:\n");
 		for(int j=0; j<3; j++){
 			for(int k=0; k<4; k++){
-				if (k==3) tf_cam_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
-				else tf_cam_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
-				if (debug) printf("%6.3f ", tf_cam_wrt_body.d[j][k]);
+				if (k==3) tf_tof_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
+				else tf_tof_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
+				if (debug) printf("%6.3f ", tf_tof_wrt_body.d[j][k]);
 			}
 			if (debug) printf("\n");
 		}
 		if (debug) printf("\n");
 	}
-	else if (dmode == dfs){
-		if(vcc_find_extrinsic_in_array("body", "stereo_l", t, n_extrinsics, &tmp)){
-			fprintf(stderr, "ERROR: %s missing stereo_l to body transform\n", VCC_EXTRINSICS_PATH);
+	if (depth_pipe_0_enable){
+		if (extrinsics0_name == NULL){
+			fprintf(stderr, "extrinsics0 is empty\n");
 			return -1;
 		}
-		if (debug) printf("stereo_wrt_body:\n");
+		if(vcc_find_extrinsic_in_array("body", extrinsics0_name, t, n_extrinsics, &tmp)){
+			fprintf(stderr, "ERROR: %s missing %s to body transform\n", extrinsics0_name, VCC_EXTRINSICS_PATH);
+			return -1;
+		}
+		if (debug) printf("%s_wrt_body:\n", extrinsics0_name);
 		for(int j=0; j<3; j++){
 			for(int k=0; k<4; k++){
-				if (k==3) tf_cam_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
-				else tf_cam_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
-				if (debug) printf("%6.3f ", tf_cam_wrt_body.d[j][k]);
+				if (k==3) tf_depth0_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
+				else tf_depth0_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
+				if (debug) printf("%6.3f ", tf_depth0_wrt_body.d[j][k]);
+			}
+			if (debug) printf("\n");
+		}
+		if (debug) printf("\n");
+	}
+	if (depth_pipe_1_enable){
+		if (extrinsics1_name == NULL){
+			fprintf(stderr, "extrinsics1 is empty\n");
+			return -1;
+		}
+		if(vcc_find_extrinsic_in_array("body", extrinsics1_name, t, n_extrinsics, &tmp)){
+			fprintf(stderr, "ERROR: %s missing %s to body transform\n", extrinsics1_name, VCC_EXTRINSICS_PATH);
+			return -1;
+		}
+		if (debug) printf("%s_wrt_body:\n", extrinsics1_name);
+		for(int j=0; j<3; j++){
+			for(int k=0; k<4; k++){
+				if (k==3) tf_depth1_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
+				else tf_depth1_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
+				if (debug) printf("%6.3f ", tf_depth1_wrt_body.d[j][k]);
+			}
+			if (debug) printf("\n");
+		}
+		if (debug) printf("\n");
+	}
+	if (depth_pipe_2_enable){
+		if (extrinsics2_name == NULL){
+			fprintf(stderr, "extrinsics0 is empty\n");
+			return -1;
+		}
+		if(vcc_find_extrinsic_in_array("body", extrinsics2_name, t, n_extrinsics, &tmp)){
+			fprintf(stderr, "ERROR: %s missing %s to body transform\n", extrinsics2_name, VCC_EXTRINSICS_PATH);
+			return -1;
+		}
+		if (debug) printf("%s_wrt_body:\n", extrinsics2_name);
+		for(int j=0; j<3; j++){
+			for(int k=0; k<4; k++){
+				if (k==3) tf_depth2_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
+				else tf_depth2_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
+				if (debug) printf("%6.3f ", tf_depth2_wrt_body.d[j][k]);
+			}
+			if (debug) printf("\n");
+		}
+		if (debug) printf("\n");
+	}
+	if (depth_pipe_3_enable){
+		if (extrinsics0_name == NULL){
+			fprintf(stderr, "extrinsics0 is empty\n");
+			return -1;
+		}
+		if(vcc_find_extrinsic_in_array("body", extrinsics3_name, t, n_extrinsics, &tmp)){
+			fprintf(stderr, "ERROR: %s missing %s to body transform\n", extrinsics3_name, VCC_EXTRINSICS_PATH);
+			return -1;
+		}
+		if (debug) printf("%s_wrt_body:\n", extrinsics3_name);
+		for(int j=0; j<3; j++){
+			for(int k=0; k<4; k++){
+				if (k==3) tf_depth3_wrt_body.d[j][k] = tmp.T_child_wrt_parent[j];
+				else tf_depth3_wrt_body.d[j][k] = tmp.R_child_to_parent[j][k];
+				if (debug) printf("%6.3f ", tf_depth3_wrt_body.d[j][k]);
 			}
 			if (debug) printf("\n");
 		}
@@ -137,8 +227,31 @@ int load_extrinsics_file(bool debug, depth_modes dmode)
  *             values.
  */
 int config_file_print(void){
-    printf("=================================================================\n");
-	printf("depth_mode:                       %s\n", depth_mode == 0 ? "tof" : "dfs");
+    printf("============================INPUTS===============================\n");
+    printf("tof_pipe:                   	  %s\n", tof_pipe);
+    printf("tof_enable:		                  %s\n", tof_enable == 0 ? "false" : "true");
+    printf("tof_rate:             		      %0.3f\n", (double)tof_rate);
+
+	printf("depth_pipe_0:                     %s\n", depth_pipe_0);
+    printf("depth_pipe_0_enable:              %s\n", depth_pipe_0_enable  == 0 ? "false" : "true");
+    printf("extrinsics0_name:                 %s\n", extrinsics0_name);
+    printf("depth0_rate:             		  %0.3f\n", (double)depth0_rate);
+
+	printf("depth_pipe_1:                     %s\n", depth_pipe_1);
+    printf("depth_pipe_1_enable:              %s\n", depth_pipe_1_enable  == 0 ? "false" : "true");
+    printf("extrinsics1_name:                 %s\n", extrinsics1_name);
+    printf("depth1_rate:             		  %0.3f\n", (double)depth1_rate);
+
+	printf("depth_pipe_2:                     %s\n", depth_pipe_2);
+    printf("depth_pipe_2_enable:              %s\n", depth_pipe_2_enable  == 0 ? "false" : "true");
+    printf("extrinsics2_name:                 %s\n", extrinsics2_name);
+    printf("depth2_rate:             		  %0.3f\n", (double)depth2_rate);
+
+	printf("depth_pipe_3:                     %s\n", depth_pipe_3);
+    printf("depth_pipe_3_enable:              %s\n", depth_pipe_3_enable  == 0 ? "false" : "true");
+    printf("extrinsics3_name:                 %s\n", extrinsics3_name);
+    printf("depth3_rate:             		  %0.3f\n", (double)depth3_rate);
+
     printf("============================GENERAL==============================\n");
     printf("robot_radius:                     %0.3f\n", robot_radius);
     printf("voxel_size:                       %0.3f\n", (double)voxel_size);
@@ -146,19 +259,19 @@ int config_file_print(void){
     printf("esdf_save_path:                   %s\n", esdf_save_path);
     printf("tsdf_save_path:                   %s\n", tsdf_save_path);
     printf("mesh_save_path:                   %s\n", mesh_save_path);
-    printf("=============================ESDF================================\n");
+    printf("============================ESDF=================================\n");
     printf("esdf_max_distance:                %0.3f\n", (double)esdf_max_distance);
     printf("esdf_min_distance:                %0.3f\n", (double)esdf_min_distance);
     printf("esdf_default_distance:            %0.3f\n", (double)esdf_default_distance);
     printf("esdf_inner_sphere_radius:         %0.3f\n", (double)esdf_inner_sphere_radius);
     printf("esdf_outer_sphere_radius:         %0.3f\n", (double)esdf_outer_sphere_radius);
-    printf("=============================RRT=================================\n");
+    printf("============================RRT==================================\n");
     printf("rrt_min_distance:                 %0.3f\n", rrt_min_distance);
     printf("rrt_max_runtime_nanoseconds:      %0.3f\n", rrt_max_runtime_nanoseconds);
     printf("rrt_use_first_solution:           %s\n", rrt_use_first_solution ? "true" : "false");
     printf("rrt_treat_unknown_as_occupied:    %s\n", rrt_treat_unknown_as_occupied ? "true" : "false");
     printf("rrt_send_tree:                    %s\n", rrt_send_tree ? "true" : "false");
-    printf("=============================LOCO=================================\n");
+    printf("============================LOCO==================================\n");
     printf("loco_num_segments:                %d\n", loco_num_segments);
     printf("loco_derivative_to_optimize:      %d\n", loco_derivative_to_optimize);
     printf("loco_poly_degree:                 %d\n", loco_poly_degree);
@@ -189,7 +302,29 @@ int config_file_read(void)
 	cJSON* parent = json_read_file(CONF_FILE);
 	if(parent==NULL) return -1;
 
-    json_fetch_int_with_default(parent, "depth_mode", &depth_mode, 0);
+	json_fetch_string_with_default(parent, "tof_pipe", tof_pipe, BUF_LEN, "/run/mpa/tof");
+    json_fetch_bool_with_default(parent, "tof_enable", (int*)&tof_enable, 1);
+	json_fetch_float_with_default(parent, "tof_rate", &tof_rate, 10.0);
+
+	json_fetch_string_with_default(parent, "depth_pipe_0", depth_pipe_0, BUF_LEN, "/run/mpa/dfs_point_cloud");
+    json_fetch_bool_with_default(parent, "depth_pipe_0_enable", (int*)&depth_pipe_0_enable, 0);
+	json_fetch_string_with_default(parent, "extrinsics0_name", extrinsics0_name, BUF_LEN, "stereo_l");
+	json_fetch_float_with_default(parent, "depth0_rate", &depth0_rate, 10.0);
+
+	json_fetch_string_with_default(parent, "depth_pipe_1", depth_pipe_1, BUF_LEN, "/run/mpa/stereo_front_pc");
+    json_fetch_bool_with_default(parent, "depth_pipe_1_enable", (int*)&depth_pipe_1_enable, 0);
+	json_fetch_string_with_default(parent, "extrinsics1_name", extrinsics1_name, BUF_LEN, "stereo_front_l");
+	json_fetch_float_with_default(parent, "depth1_rate", &depth1_rate, 10.0);
+
+	json_fetch_string_with_default(parent, "depth_pipe_2", depth_pipe_2, BUF_LEN, "/run/mpa/stereo_rear_pc");
+    json_fetch_bool_with_default(parent, "depth_pipe_2_enable", (int*)&depth_pipe_2_enable, 0);
+	json_fetch_string_with_default(parent, "extrinsics2_name", extrinsics2_name, BUF_LEN, "stereo_rear_l");
+	json_fetch_float_with_default(parent, "depth2_rate", &depth2_rate, 10.0);
+
+	json_fetch_string_with_default(parent, "depth_pipe_3", depth_pipe_3, BUF_LEN, "/run/mpa/dfs_point_cloud");
+    json_fetch_bool_with_default(parent, "depth_pipe_3_enable", (int*)&depth_pipe_3_enable, 0);
+	json_fetch_string_with_default(parent, "extrinsics3_name", extrinsics3_name, BUF_LEN, "stereo_l");
+	json_fetch_float_with_default(parent, "depth3_rate", &depth3_rate, 10.0);
 
 	json_fetch_double_with_default(parent, "robot_radius", &robot_radius, 0.3);
 	json_fetch_float_with_default(parent, "voxel_size", &voxel_size, 0.2);

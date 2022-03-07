@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
     if (en_debug) config_file_print();
 
     printf("Loading extrinsics config file\n");
-	if(load_extrinsics_file(en_debug, depth_modes(depth_mode))) return -1;
+	if(load_extrinsics_file(en_debug)) return -1;
 
     _mkdir("/data/voxl_mapper/");
 
@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
 
     printf("Trying to init tsdf server\n");
     // initialize tsdf server
-    voxblox::TsdfServer tsdf_server(map_config, int_config, mesh_config, en_debug, en_timing, depth_modes(depth_mode));
+    voxblox::TsdfServer tsdf_server(map_config, int_config, mesh_config, en_debug, en_timing);
     printf("created tsdf server\n");
 	// indicate to the soon-to-be-started thread that we are initialized
 	// and running, this is an extern variable in start_stop.c
