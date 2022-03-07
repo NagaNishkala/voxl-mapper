@@ -154,8 +154,11 @@ inline void createCostmapFromLayer(const Layer<EsdfVoxel>& layer, unsigned int f
 {
     BlockIndexList blocks;
     if (only_updates) layer.getAllUpdatedBlocks(Update::kMap, &blocks);
-    else layer.getAllAllocatedBlocks(&blocks);
-
+    else {
+        cost_map.clear();
+        layer.getAllAllocatedBlocks(&blocks);
+    }
+    
     if (blocks.size() == 0) return;
 
     // Cache layer settings.

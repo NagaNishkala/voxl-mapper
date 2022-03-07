@@ -720,7 +720,7 @@ void TsdfServer::publish2DCostmap()
     pt_.intensity = 0;
     cost_map_ptc.push_back(pt_);
 
-    // intensity ptcloud for occupied (t/f)
+    // intensity ptcloud for occupied (gradient)
     point_cloud_metadata_t costmap_meta;
     costmap_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
     costmap_meta.timestamp_ns = rc_nanos_monotonic_time();
