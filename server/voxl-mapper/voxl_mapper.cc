@@ -133,13 +133,13 @@ rc_tf_t TsdfServer::get_rc_tf_t(int ch){
 
     case MPA_DEPTH_0_CH:
         return tf_depth0_wrt_body;
-    
+
     case MPA_DEPTH_1_CH:
         return tf_depth1_wrt_body;
 
     case MPA_DEPTH_2_CH:
         return tf_depth2_wrt_body;
-    
+
     case MPA_DEPTH_3_CH:
         return tf_depth3_wrt_body;
 
@@ -157,13 +157,13 @@ int64_t TsdfServer::get_dif_per_frame(int ch){
 
     case MPA_DEPTH_0_CH:
         return 1000000000/depth0_rate;
-    
+
     case MPA_DEPTH_1_CH:
         return 1000000000/depth1_rate;
 
     case MPA_DEPTH_2_CH:
         return 1000000000/depth2_rate;
-    
+
     case MPA_DEPTH_3_CH:
         return 1000000000/depth3_rate;
 
@@ -181,13 +181,13 @@ int TsdfServer::get_index_by_ch(int ch){
 
     case MPA_DEPTH_0_CH:
         return 1;
-    
+
     case MPA_DEPTH_1_CH:
         return 2;
 
     case MPA_DEPTH_2_CH:
         return 3;
-    
+
     case MPA_DEPTH_3_CH:
         return 4;
 
@@ -1044,6 +1044,10 @@ bool TsdfServer::followPath()
     out.magic_number = TRAJECTORY_MAGIC_NUMBER;
     out.creation_time_ns = rc_nanos_monotonic_time();
     out.n_segments = msg.segments.size();
+
+    // TEMP PATCH //
+    // use load and start until collision avoidance merged //
+    out.traj_command = TRAJ_CMD_LOAD_AND_START;
 
     for(int i = 0; i < msg.segments.size(); i++){
         if (msg.segments[i].num_coeffs > TRAJ_MAX_COEFFICIENTS){
