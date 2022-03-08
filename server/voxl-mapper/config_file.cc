@@ -39,7 +39,6 @@
 #define CONFIG_FILE_HEADER "\
 /**\n\
  * This file contains configuration that's specific to voxl-mapper.\n\
- * depth_mode = 0 for tof input or 1 for dfs input.\n\
  */\n"
 
 

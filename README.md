@@ -114,30 +114,6 @@ Configure cameras, if not already working. Select correct config that correspond
 voxl:/$ voxl-configure-cameras
 ```
 
-Edit the config file for voxl-camera-server to set the tof at a lower framerate
-```
-voxl:/$ vi /etc/modalai/voxl-camera-server.conf
-{
-        "version":      0.2,
-        "port_J2":      {
-                "name": "tof",
-                "enabled":      true,
-                "type": "tof",
-                "api":  "hal3",
-                "tof_mode":     9,
-                "frame_rate":   10, ## SET TO 10 ##
-                "override_id":  -1,
-                "auto_exposure_mode":   "isp",
-                "preview":      {
-                        "enabled":      true,
-                        "width":        224,
-                        "height":       1557,
-                        "format":       "blob"
-                }
-        },
-		...
-```
-
 Now, we can enable and restart the camera server to make sure these changes go into effect
 ```
 voxl:/$ systemctl enable voxl-camera-server
@@ -182,7 +158,26 @@ voxl:/$ cat /etc/modalai/voxl-mapper.conf
  * This file contains configuration that's specific to voxl-mapper.
  */
 {
-	"robot_radius":	0.30,
+	"tof_pipe":	"/run/mpa/tof",
+	"tof_enable":	true,
+	"tof_rate":	10,
+	"depth_pipe_0":	"/run/mpa/dfs_point_cloud",
+	"depth_pipe_0_enable":	false,
+	"extrinsics0_name":	"stereo_l",
+	"depth0_rate":	10,
+	"depth_pipe_1":	"/run/mpa/stereo_front_pc",
+	"depth_pipe_1_enable":	false,
+	"extrinsics1_name":	"stereo_front_l",
+	"depth1_rate":	10,
+	"depth_pipe_2":	"/run/mpa/stereo_rear_pc",
+	"depth_pipe_2_enable":	false,
+	"extrinsics2_name":	"stereo_rear_l",
+	"depth2_rate":	10,
+	"depth_pipe_3":	"/run/mpa/dfs_point_cloud",
+	"depth_pipe_3_enable":	false,
+	"extrinsics3_name":	"stereo_l",
+	"depth3_rate":	10,
+	"robot_radius":	0.3,
 	"voxel_size":	0.20000000298023224,
 	"voxels_per_side":	16,
 	"esdf_save_path":	"/data/voxl_mapper/esdf_map",
@@ -212,6 +207,22 @@ voxl:/$ cat /etc/modalai/voxl-mapper.conf
 	"loco_verbose":	false
 }
 ```
+* depth_pipe* is the name of any generic depth pointcloud topic that will be integrated into the map
+* depth_pipe*_enable turns on or off the specific input source
+* extrisics*_name is the name "child" relation to the body frame for this specific sensor. Default sensor    extrinsics are defined in /etc/modalai/extrinsics.conf
+	* example -> "stereo_l" for a dfs input
+	```
+	// from /etc/modalai/extrinsics.conf //
+	}, {
+			"parent":	"body",
+			"child":	"stereo_l",
+			"T_child_wrt_parent":	[0.1, -0.04, 0],
+			"RPY_parent_to_child":	[0, 90, 90]
+		}, {
+	...
+	```
+* depth*_rate is the fixed rate (in Hz) that a sensor will be sampled at. This can be useful when combining multiple inputs or high incoming data rates
+
 The default options are setup for a ModalAi Seeker Drone equipped with a VOXL Time of Flight (TOF) Depth Sensor but can be tuned for your specific use case.
 
 The parameters listed above are slightly different than stock, and are tuned for the ModalAi Seeker Drone in a specific setting: short, quick paths around a room. If looking to plan longer distances, it will be helpful to increase the "rrt_max_runtime_nanoseconds", "loco_num_segments", and "loco_poly_degree" params in small increments.
