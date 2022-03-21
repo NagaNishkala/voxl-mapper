@@ -12,4 +12,13 @@ echo ""
 echo "Done installing voxl-mapper"
 echo ""
 
+# rescan /usr/lib for new libraries this package may provide
+if [ -f "/sbin/ldconfig" ]; then
+    ldconfig
+fi
+
+# try to reload services, but don't fail if it can't
+set +e
+systemctl daemon-reload
+
 # make sure there is a newline at the end here or opkg will whine

@@ -18,23 +18,25 @@ set -e # exit on error to prevent bad ipk from being generated
 ################################################################################
 
 USETIMESTAMP=false
-MAKE_DEB=false
+MAKE_DEB=true
 MAKE_IPK=false
 
 print_usage(){
 	echo ""
 	echo " Package the current project into a deb or ipk package."
 	echo " You must run build.sh first to build the binaries"
+	echo " if no arguments are given it builds a deb"
 	echo ""
 	echo " Usage:"
+	echo "  ./make_package.sh"
+	echo "  ./make_package.sh deb"
+	echo "        Build a DEB package"
 	echo ""
 	echo "  ./make_package.sh ipk"
-	echo "        Build an IPK package for 820"
+	echo "        Build an IPK package"
 	echo ""
-	echo "  ./make_package.sh deb"
-	echo "        Build a DEB package for 865"
-	echo ""
-	echo "  ./make_package.sh 865 timestamp"
+	echo "  ./make_package.sh timestamp"
+	echo "  ./make_package.sh deb timestamp"
 	echo "        Build a DEB package with the current timestamp as a"
 	echo "        suffix in both the package name and deb filename."
 	echo "        This is used by CI for development packages."
@@ -53,19 +55,17 @@ process_argument () {
 	arg=$(echo "$1" | tr '[:upper:]' '[:lower:]')
 	case ${arg} in
 		"")
-			#echo "Making Normal Package"
 			;;
 		"-t"|"timestamp"|"--timestamp")
 			echo "using timestamp suffix"
 			USETIMESTAMP=true
 			;;
 		"-d"|"deb"|"debian"|"--deb"|"--debian")
-			echo "using timestamp suffix"
 			MAKE_DEB=true
 			;;
 		"-i"|"ipk"|"opkg"|"--ipk"|"--opkg")
-			echo "using timestamp suffix"
 			MAKE_IPK=true
+			MAKE_DEB=false
 			;;
 		*)
 			echo "invalid option"
@@ -82,19 +82,13 @@ do
 done
 
 
-if [ $MAKE_DEB == false ] && [ $MAKE_IPK == false ]; then
-	echo "please specify \"deb\" or \"ipk\" argument to specify what package to build"
-	print_usage
-	exit 1
-fi
-
 ################################################################################
 # variables
 ################################################################################
 VERSION=$(cat pkg/control/control | grep "Version" | cut -d' ' -f 2)
 PACKAGE=$(cat pkg/control/control | grep "Package" | cut -d' ' -f 2)
 IPK_NAME=${PACKAGE}_${VERSION}.ipk
-DEB_NAME=${PACKAGE}_${VERSION}.deb
+
 
 DATA_DIR=pkg/data
 CONTROL_DIR=pkg/control
@@ -227,12 +221,12 @@ if $MAKE_DEB; then
 		dts=$(date +"%Y%m%d%H%M")
 		sed -E -i "s/Version.*/&-$dts/" $DEB_DIR/DEBIAN/control
 		VERSION="${VERSION}-${dts}"
-		DEB_NAME=${PACKAGE}_${VERSION}.deb
 		echo "new version with timestamp: $VERSION"
 	fi
 
-
+	DEB_NAME=${PACKAGE}_${VERSION}_arm64.deb
 	dpkg-deb --build ${DEB_DIR} ${DEB_NAME}
+
 fi
 
 echo "DONE"

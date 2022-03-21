@@ -9,24 +9,27 @@ set -e
 
 SSH_PWD="oelinux123"
 
-DPKG_CHECK_STRING='command -v dpkg &> /dev/null; echo -n $?'
-OPKG_CHECK_STRING='command -v opkg &> /dev/null; echo -n $?'
 
-PACKAGE=$(cat pkg/control/control | grep "Package" | cut -d' ' -f 2)
-
-# count package files in current directory
-NUM_IPK=$(ls -1q $PACKAGE*.ipk 2>/dev/null | wc -l)
-NUM_DEB=$(ls -1q $PACKAGE*.deb 2>/dev/null | wc -l)
-
-if [[ $NUM_IPK -eq "0" && $NUM_DEB -eq "0" ]]; then
-	echo "ERROR: missing ipk and/or deb"
-	echo "run make_package.sh first"
-	exit 1
-elif [[ $NUM_IPK -gt "1" || $NUM_DEB -gt "1" ]]; then
-	echo "ERROR: more than 1 ipk or deb file found"
-	echo "make sure there is at most one of each in the current directory"
-	exit 1
-fi
+print_usage(){
+	echo ""
+	echo " Deploy an ipk or deb package to VOXL over adb or ssh"
+	echo " You must run ./make_package.sh first to build the package."
+	echo ""
+	echo " Usage to push over adb:"
+	echo "  ./deploy_to_voxl.sh"
+	echo "  ./deploy_to_voxl.sh adb"
+	echo ""
+	echo " Usage to push over ssh:"
+	echo "   if VOXL_IP env variable is set:"
+	echo "  ./deploy_to_voxl.sh ssh"
+	echo ""
+	echo "   manually specifying a full IP address:"
+	echo "  ./deploy_to_voxl.sh ssh 192.168.1.123"
+	echo ""
+	echo "   manually specifying last block of the IP"
+	echo "  ./deploy_to_voxl.sh ssh 123"
+	echo ""
+}
 
 
 #check adb (default) or ssh or print help text
@@ -81,6 +84,23 @@ fi
 
 
 
+# count package files in current directory
+NUM_IPK=$(ls -1q *.ipk 2>/dev/null | wc -l)
+NUM_DEB=$(ls -1q *.deb 2>/dev/null | wc -l)
+
+if [[ $NUM_IPK -eq "0" && $NUM_DEB -eq "0" ]]; then
+	echo "ERROR: missing ipk and/or deb"
+	echo "run make_package.sh first"
+	exit 1
+elif [[ $NUM_IPK -gt "1" || $NUM_DEB -gt "1" ]]; then
+	echo "ERROR: more than 1 ipk or deb file found"
+	echo "make sure there is at most one of each in the current directory"
+	exit 1
+fi
+
+DPKG_CHECK_STRING='command -v dpkg &> /dev/null; echo -n $?'
+OPKG_CHECK_STRING='command -v opkg &> /dev/null; echo -n $?'
+
 if [ "$DEPLOY_MODE" == "ssh" ]; then
 	if ! command -v sshpass &> /dev/null ;then
 		echo ""
@@ -126,13 +146,13 @@ else
 
 	if adb shell "$DPKG_CHECK_STRING" | grep -q 0 ; then
 		echo "dpkg detected";
-		FILE=$(ls -1q $PACKAGE*.deb)
+		FILE=(*.deb)
 		adb push $FILE /data/$FILE
 		adb shell "dpkg -i --force-downgrade --force-depends /data/$FILE"
 
 	elif adb shell "$OPKG_CHECK_STRING" | grep -q 0 ; then
 		echo "opkg detected";
-		FILE=$(ls -1q $PACKAGE*.ipk)
+		FILE=(*.ipk)
 		adb push $FILE /data/$FILE
 		adb shell "opkg install --force-reinstall --force-downgrade --force-depends --force-overwrite /data/$FILE"
 
