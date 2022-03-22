@@ -53,19 +53,16 @@ RRTSTAR::RRTSTAR(Eigen::Vector3d start, Eigen::Vector3d end, std::shared_ptr<vox
     loco_params.split_at_collisions_ = loco_split_at_collisions;
 
     loco_smoother_.setParameters(loco_params);
-    loco_smoother_.setMapDistanceCallback(std::bind(&RRTSTAR::getMapDistance, this, std::placeholders::_1));
+    // loco_smoother_.setMapDistanceCallback(std::bind(&RRTSTAR::getMapDistance, this, std::placeholders::_1));
     loco_smoother_.setInCollisionCallback(std::bind(&RRTSTAR::checkCollisionWithRobot, this, std::placeholders::_1));
     loco_smoother_.setDistanceAndGradientFunction(std::bind(&RRTSTAR::getMapDistanceAndGradient, this, std::placeholders::_1, std::placeholders::_2));
 
     loco_smoother_.loco_config.polynomial_degree = loco_poly_degree;
     loco_smoother_.loco_config.derivative_to_optimize = loco_derivative_to_optimize;
-    loco_smoother_.loco_config.robot_radius = robot_radius;
+    loco_smoother_.loco_config.robot_radius = (robot_radius*2.0);
     loco_smoother_.loco_config.w_d = loco_smoothness_cost_weight;
     loco_smoother_.loco_config.w_c = loco_collision_cost_weight;
     loco_smoother_.loco_config.w_w = loco_waypoint_cost_weight;
-
-    loco_smoother_.setPoly(loco_poly_degree, loco_derivative_to_optimize);
-
 
     std::string benchmark_path = BENCHMARK_FILE;
     if (!exists_(benchmark_path)){
@@ -124,6 +121,7 @@ double RRTSTAR::PathCost(Node *qFrom, Node *qTo)
         if(cur->parent == NULL){
             throw("ERROR: PathCost reached a node without a parent");
         }
+        if (cur->parent->position == endPos) break;
         totalDistance += distance(cur, cur->parent);
     }
 
@@ -191,16 +189,54 @@ int RRTSTAR::binSelect(int index)
 
 void RRTSTAR::near(Eigen::Vector3d point, vector<Node *>& out_nodes)
 {
-    // return the whole container
-    int actual_index = flatIndexfromPoint(point);
-    if(!nodes[actual_index].empty()){
-        out_nodes = nodes[actual_index];
+    int index = flatIndexfromPoint(point);
+
+    // check left/right, forward/back, up/down by 1. if those all fail, keep looking around it
+    int x_offset = 1;
+    int y_offset = d_x;
+    int z_offset = d_y * d_x;
+
+    // independent checks
+    bool l_x, l_y, l_z, r_x, r_y, r_z;
+    l_x = l_y = l_z = r_x = r_y = r_z = true;
+
+    while ((l_x || l_y || l_z || r_x || r_y || r_z) && out_nodes.size() < 10){
+
+        if (l_x && index-x_offset < 0) l_x = false;
+        if (r_x && index+x_offset >= nodes.size()) r_x = false;
+
+        if (l_y && index-y_offset < 0) l_y = false;
+        if (r_y && index+y_offset >= nodes.size()) r_y = false;
+
+        if (l_z && index-z_offset < 0) l_z = false;
+        if (r_z && index+z_offset >= nodes.size()) r_z = false;
+
+        if (r_x && !nodes.at(index+x_offset).empty()) out_nodes.insert(out_nodes.end(), nodes[index+x_offset].begin(), nodes[index+x_offset].end());
+        if (l_x && !nodes.at(index-x_offset).empty()) out_nodes.insert(out_nodes.end(), nodes[index-x_offset].begin(), nodes[index-x_offset].end());
+
+        if (r_y && !nodes.at(index+y_offset).empty()) out_nodes.insert(out_nodes.end(), nodes[index+y_offset].begin(), nodes[index+y_offset].end());
+        if (l_y && !nodes.at(index-y_offset).empty()) out_nodes.insert(out_nodes.end(), nodes[index-y_offset].begin(), nodes[index-y_offset].end());
+
+        if (r_z && !nodes.at(index+z_offset).empty()) out_nodes.insert(out_nodes.end(), nodes[index+z_offset].begin(), nodes[index+z_offset].end());
+        if (l_z && !nodes.at(index-z_offset).empty()) out_nodes.insert(out_nodes.end(), nodes[index-z_offset].begin(), nodes[index-z_offset].end());
+
+        x_offset += 1;
+        y_offset += d_x;
+        z_offset += d_y * d_x;
     }
-    else {
-        actual_index = binSelect(actual_index);
-        out_nodes = nodes[actual_index];
-    }
+
     return;
+    // // return the whole container
+    // int actual_index = flatIndexfromPoint(point);
+
+    // if(!nodes[actual_index].empty()){
+    //     out_nodes.insert(out_nodes.end(), nodes[actual_index].begin(), nodes[actual_index].end());
+    // }
+    // else {
+    //     actual_index = binSelect(actual_index);
+    //     out_nodes.insert(out_nodes.end(), nodes[actual_index].begin(), nodes[actual_index].end());
+    // }
+    // return;
 }
 
 int RRTSTAR::flatIndexfromPoint(Eigen::Vector3d point)
@@ -220,9 +256,10 @@ Node* RRTSTAR::nearest(Eigen::Vector3d point, bool end)
 
         for (int i = 0; i < nodes[actual_index].size(); i++){
 
-        if (nodes[actual_index][i] == NULL) continue;
+            if (nodes[actual_index][i] == NULL) continue;
+            if (nodes[actual_index][i]->position == endPos && nodes[actual_index][i]->parent) continue;
             double dist = distance(point, nodes[actual_index][i]->position);
-            if (dist <= 0.1){
+            if (dist <= 0.01){
                 if (end) closest = nodes[actual_index][i];
                 else closest = NULL;
                 return closest;
@@ -233,12 +270,14 @@ Node* RRTSTAR::nearest(Eigen::Vector3d point, bool end)
             }
         }
     }
-    else {
+
+    if (closest == NULL) {
+    // else {
         actual_index = binSelect(actual_index);
         if (!nodes[actual_index].empty()){
             for (int i = 0; i < nodes[actual_index].size(); i++){
                 double dist = distance(point, nodes[actual_index][i]->position);
-                if (dist <= 0.1){
+                if (dist <= 0.01){
                     if (end) closest = nodes[actual_index][i];
                     else closest = NULL;
                     return closest;
@@ -344,18 +383,19 @@ double RRTSTAR::getMapDistanceAndGradient(const Eigen::Vector3d& position, Eigen
     double distance = 0.0;
     if (!(esdf_map->getDistanceAndGradientAtPosition(position, false, &distance, gradient))) {
         // if we cannot identify a voxel close enough to this location WITHOUT interpolation, it is unknown so reject it
-        if (rrt_treat_unknown_as_occupied){
+        // if (rrt_treat_unknown_as_occupied){
             return 0.0;
-        }
-        else return esdf_default_distance;
+        // }
+        // else return esdf_default_distance;
     }
     return distance;
 }
 
 bool RRTSTAR::checkCollisionWithRobot(Eigen::Vector3d robot_position)
 {
+    static double radius__ = robot_radius * 1.75;
     float distance = getMapDistance(robot_position);
-    return robot_radius >= (double)distance;
+    return radius__ >= (double)distance;
 }
 
 bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end)
@@ -373,10 +413,11 @@ bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end, std::pair<
     Eigen::Vector3d direction_vec = end - start;
     double path_length = distance(start, end);
 
-    int dist_val = path_length*3;
+    // int dist_val = path_length;
+    static const int max_jump = 0.75;
 
-    for (int i = 1; i < dist_val; i++){
-        Eigen::Vector3d new_pt = start + (direction_vec * i/dist_val);
+    for (double i = 0.1; i < path_length; i+=0.1){
+        Eigen::Vector3d new_pt = start + (direction_vec * i);
         bool collision = checkCollisionWithRobot(new_pt);
         if (collision) return false;
         else {
@@ -386,6 +427,7 @@ bool RRTSTAR::checkMotion(Eigen::Vector3d start, Eigen::Vector3d end, std::pair<
                 i+=getMapDistance(new_pt);
             }
         }
+        if (i >= max_jump) return false;
     }
     return true;
 }
@@ -426,6 +468,7 @@ int RRTSTAR::simplifyPath()
                 removals++;
             }
         }
+        if (path.empty() || path.size() <= 3) return removals;
     }
     return removals;
 }
@@ -441,13 +484,18 @@ bool RRTSTAR::checkPathForCollisions(mav_msgs::EigenTrajectoryPointVector& path)
 
 bool RRTSTAR::locoSmooth(mav_msgs::EigenTrajectoryPointVector& coordinate_path, mav_msgs::EigenTrajectoryPointVector* path, mav_trajectory_generation::Trajectory* last_trajectory_)
 {
-    loco_smoother_.setResampleTrajectory(true);
-    loco_smoother_.setAddWaypoints(false);
+    // loco_smoother_.setResampleTrajectory(true);
+    // loco_smoother_.setAddWaypoints(false);
+
+    // turi -- test
+    // loco_smoother_.setPoly(coordinate_path.size(), loco_derivative_to_optimize);
+
     bool got = loco_smoother_.getTrajectoryBetweenWaypoints(coordinate_path, last_trajectory_);
+
     bool success = false;
     if (got){
         mav_msgs::EigenTrajectoryPoint::Vector states;
-        double sampling_interval = 0.1;
+        double sampling_interval = 0.05;
         success = mav_trajectory_generation::sampleWholeTrajectory(*last_trajectory_, sampling_interval, path);
     }
     return got && success;
@@ -607,7 +655,8 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
                     neighborhood_t += (time_end-time_start);
                     neighborhood_count++;
                 }
-
+                if (end->parent) std::remove(Qnear.begin(), Qnear.end(), end);
+                end->children.clear();
                 Node *qMin = qNearest;
 
                 // add the edge between qMin(lowest cost out of nodes in Qnear) and qRand
@@ -617,6 +666,7 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
                 if(checkMotion(endPos, qRand->position)){
                     if(end->parent){
                         if(PathCost(end, root) < distance(endPos, qRand->position) + PathCost(qRand, root)){
+                            end->children.clear();
                             add(qRand, end);
                         }
                     }
@@ -662,9 +712,9 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
         }
         if (rrt_send_tree){
             drawTreeLayer(root, &rrt_star_tree);
-            tree_meta.timestamp_ns = rc_nanos_monotonic_time();
+            tree_meta.timestamp_ns = 2; // from portal, TREE_FORMAT = 2;
             tree_meta.n_points = rrt_star_tree.size();
-            tree_meta.format = 6;     // 6 - rrt star tree format holder for voxl-portal
+            tree_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
             if (tree_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, tree_meta, rrt_star_tree.data());
             // necessary so websocket can handle data stream, should handle portal side eventually
             rrt_star_tree.clear();
@@ -673,9 +723,9 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
         if (!solved && reached()){
             solved = true;
             end_time = rc_nanos_monotonic_time();
-            printf("RRTSTAR Reached Destination\n");
+            fprintf(stderr, "RRTSTAR Reached Destination\n");
             if(rrt_use_first_solution) break;
-            else printf("Attempting to refine current path");
+            else fprintf(stderr, "Attempting to refine current path");
         }
     }
     if (!solved) end_time = rc_nanos_monotonic_time();
@@ -703,16 +753,17 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
 
     Node *q;
     if (!solved) printf("RRTSTAR FAILED: Exceeded max iterations. Outputting closest path\n");
-    if (rrt_use_first_solution)q = lastNode;
+    if (rrt_use_first_solution) q = lastNode;
+    else if (end->parent) q = end;
     else q = nearest(endPos, true);
 
     // generate shortest path to destination.
-    while (q->parent != NULL) {
+    while (q->parent != NULL && !(std::count(path.begin(), path.end(), q))) {
         path.push_back(q);
         q = q->parent;
     }
 
-    // if root node (start) not in graph, add it in
+    // if root node (start) or end node not in graph, add em in before we smooth
     if (std::find(path.begin(), path.end(), root) == path.end()) path.push_back(root);
     if (std::find(path.begin(), path.end(), end) == path.end())  path.insert(path.begin(), end);
 
@@ -728,7 +779,7 @@ void RRTSTAR::Solve(mav_trajectory_generation::Trajectory* last_trajectory_)
     nodesToEigen(&base_path);
 
     bool collisions_on_base = checkPathForCollisions(base_path);
-    fprintf(stderr, "Collisions along base path-> %s\n", collisions_on_base ? "no" : "yes");
+    fprintf(stderr, "Collisions along base path-> %s\n", collisions_on_base ? "yes" : "no");
 
     std::ofstream myfile;
     myfile.open (BENCHMARK_FILE, ios_base::app);

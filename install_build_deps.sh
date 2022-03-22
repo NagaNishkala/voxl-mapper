@@ -1,60 +1,133 @@
 #!/bin/bash
+################################################################################
+# Copyright (c) 2022 ModalAI, Inc. All rights reserved.
+################################################################################
 
-# list all your dependencies here
-DEPS="libmodal_json openmp libvoxl_cutils ceres-solver nlopt voxl-mpa-tools libmodal_pipe voxblox"
+# Script to install build dependencies in voxl-cross docker image
+
+# list all your dependencies here. Note for packages that have AMD64 equivalents
+# in the ubuntu repositories you should specify the arm64 architecture to make
+# sure the correct one is installed in voxl-cross.
+DEPS_QRB5165="
+libmodal-json
+libvoxl-cutils
+voxl-ceres-solver
+voxl-nlopt
+voxl-mpa-tools
+libmodal-pipe
+voxl-voxblox"
+
+DEPS_APQ8096="
+libmodal-json
+libvoxl-cutils
+voxl-ceres-solver
+voxl-nlopt
+voxl-mpa-tools
+libmodal-pipe
+voxl-voxblox"
 
 
-# variables
-OPKG_CONF=/etc/opkg/opkg.conf
-STABLE=http://voxl-packages.modalai.com/stable
-DEV=http://voxl-packages.modalai.com/dev
+## this list is just for tab-completion
+## it's not an exhaustive list of platforms available.
+AVAILABLE_PLATFORMS="qrb5165 apq8096"
 
 
-# make sure opkg config file exists
-if [ ! -f ${OPKG_CONF} ]; then
-	echo "ERROR: missing ${OPKG_CONF}"
-	echo "are you not running in voxl-emulator or voxl-cross?"
+print_usage(){
+	echo ""
+	echo " Install build dependencies from a specified repository."
+	echo " For apq8096 \"dev\" and \"stable\" repos the packages"
+	echo " will be pulled as IPKs and installed with opkg."
+	echo " Otherwise debs will be pulled with apt."
+	echo ""
+	echo " Usage:"
+	echo "  ./install_build_deps.sh {platform} {section}"
+	echo ""
+	echo " Examples:"
+	echo ""
+	echo "  ./install_build_deps.sh qrb5165 dev"
+	echo "        Install from qrb5165 development repo."
+	echo ""
+	echo "  ./install_build_deps.sh qrb5165 sdk-1.0"
+	echo "        Install from qrb5165 sdk-1.0 repo."
+	echo ""
+	echo "  ./install_build_deps.sh apq8096 dev"
+	echo "        Install from apq8096 development repo."
+	echo ""
+	echo "  ./install_build_deps.sh apq8096 staging"
+	echo "        Install from apq8096 staging repo."
+	echo ""
+	echo ""
+	echo " These examples are not an exhaustive list."
+	echo " Any platform and section in this deb repo can be used:"
+	echo "     http://voxl-packages.modalai.com/dists/"
+	echo ""
+}
+
+# make sure two arguments were given
+if [ "$#" -ne 2 ]; then
+	print_usage
 	exit 1
+fi
+MODE="DEB"
+
+## convert arguments to lower case for robustness
+PLATFORM=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+SECTION=$(echo "$2" | tr '[:upper:]' '[:lower:]')
+
+# use ipk mode for apq8096
+if [ "$PLATFORM" == "apq8096" ]; then
+	MODE="IPK"
 fi
 
 
-# parse dev or stable option
-if [ "$1" == "stable" ]; then
-	echo "using stable repository"
-	PKG_STRING="src/gz stable ${STABLE}"
+# install deb packages with apt
+if [ "$MODE" == "DEB" ]; then
+	echo "using $PLATFORM $SECTION debian repo"
+	# write in the new entry
+	DPKG_FILE="/etc/apt/sources.list.d/modalai.list"
+	LINE="deb [trusted=yes] http://voxl-packages.modalai.com/ ./dists/$PLATFORM/$SECTION/binary-arm64/"
+	sudo echo "${LINE}" > ${DPKG_FILE}
 
-elif [ "$1" == "dev" ]; then
-	echo "using development repository"
-	PKG_STRING="src/gz dev ${DEV}"
+	## make sure we have the latest package index
+	## only pull from voxl-packages to save time
+	sudo apt-get update -o Dir::Etc::sourcelist="sources.list.d/modalai.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"
 
+	## install the user's list of dependencies
+	echo "installing: $DEPS_QRB5165"
+	sudo apt install -y $DEPS_QRB5165
+
+# install IPK packages with opkg
 else
-	echo ""
-	echo "Please specify if the build dependencies should be pulled from"
-	echo "the stable or development modalai opkg package repos."
-	echo "If building the master branch you should specify stable."
-	echo "For development branches please specify dev."
-	echo ""
-	echo "./install_build_deps.sh stable"
-	echo "./install_build_deps.sh dev"
-	echo ""
-	exit 1
+	echo "using $PLATFORM $SECTION repo"
+	OPKG_CONF="/etc/opkg/opkg.conf"
+	# delete any existing repository entries
+	sudo sed -i '/voxl-packages.modalai.com/d' ${OPKG_CONF}
+
+	# add arm64 architecture if necessary
+	if ! grep -q "arch arm64" "${OPKG_CONF}"; then
+		echo "adding arm64 to opkg conf"
+		sudo echo "arch arm64 7" >> ${OPKG_CONF}
+	fi
+
+	# write in the new entry
+	LINE="src/gz ${SECTION} http://voxl-packages.modalai.com/dists/$PLATFORM/${SECTION}/binary-arm64/"
+	sudo echo "$LINE" >> ${OPKG_CONF}
+	sudo echo "" >> ${OPKG_CONF}
+
+	## make sure we have the latest package index
+	sudo opkg update
+
+	echo "installing: $DEPS_APQ8096"
+
+	# install/update each dependency
+	for i in ${DEPS_APQ8096}; do
+		# this will also update if already installed!
+		sudo opkg install --nodeps $i
+	done
+
 fi
 
-# delete any existing repository entries
-sudo sed -i '/voxl-packages.modalai.com/d' ${OPKG_CONF}
-
-# write in the new entry
-sudo echo ${PKG_STRING} >> ${OPKG_CONF}
-sudo echo "" >> ${OPKG_CONF}
-
-## make sure we have the latest package index
-sudo opkg update
-
-
-# install/update each dependency
-for i in ${DEPS}; do
-	# this will also update if already installed!
-	sudo opkg install --nodeps $i
-done
-
+echo ""
+echo "Done installing dependencies"
+echo ""
 exit 0

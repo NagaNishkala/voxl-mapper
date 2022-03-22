@@ -48,7 +48,7 @@ bool deserializeMsgToLayer(const voxblox_msgs::Layer &msg, Layer<VoxelType> *lay
     // sanity check
     if (layer == nullptr){
         fprintf(stderr, "layer is null: %s\n", __FUNCTION__);
-        return;
+        return false;
     }
     return deserializeMsgToLayer<VoxelType>(msg, static_cast<MapDerializationAction>(msg.action), layer);
 }
@@ -59,7 +59,7 @@ bool deserializeMsgToLayer(const voxblox_msgs::Layer& msg, const MapDerializatio
     // sanity checks
     if (layer == nullptr){
         fprintf(stderr, "layer is null: %s\n", __FUNCTION__);
-        return false;;
+        return false;
     }
     if (getVoxelType<VoxelType>().compare(msg.layer_type) != 0) {
         return false;

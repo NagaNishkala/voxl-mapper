@@ -1,9 +1,0 @@
-Package: voxl-mapper
-Version: 0.0.1
-Section: base
-Priority: optional
-Architecture: all
-Depends: libmodal_json, openmp, libvoxl_cutils, ceres-solver, nlopt, voxl-mpa-tools, libmodal_pipe, voxblox
-Conflicts:
-Maintainer: matt.turi@modalai.com
-Description: voxl-mapper

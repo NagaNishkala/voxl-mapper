@@ -8,7 +8,7 @@
 #include "voxl_cutils.h"
 #include "mesh_vis.h"
 #include "rc_transform_ringbuf.h"
-
+#include "config_file.h"
 
 namespace voxblox
 {
@@ -34,7 +34,7 @@ public:
     static void _vio_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, __attribute__((unused)) void *context);
     static void _vio_disconnect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context);
     static void _control_pipe_cb(__attribute__((unused)) int ch, char* string, int bytes, __attribute__((unused)) void* context);
-
+    static void _stereo_pc_helper_cb(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
     /// general mpa
     int initMPA();
     void closeMPA();
@@ -69,9 +69,18 @@ public:
     /// clears map
     virtual void clear();
 
+    /// visual update func
+    void visual_updates_thread_worker();
+
     // general public params
     bool en_debug;
     bool en_timing;
+
+    // helpers
+    rc_tf_t get_rc_tf_t(int ch);
+    int64_t get_dif_per_frame(int ch);
+    int get_index_by_ch(int ch);
+
 
 protected:
     /// boolean showing if we are planning, used to stop other background processes
@@ -101,6 +110,11 @@ protected:
     Eigen::Vector3d start_pose;
     Eigen::Vector3d goal_pose;
 
+    std::thread visual_updates_thread;
+    std::atomic<bool> keep_updating;
+
+
+    // paths
     mav_trajectory_generation::Trajectory path_to_follow;
 
     // costmap

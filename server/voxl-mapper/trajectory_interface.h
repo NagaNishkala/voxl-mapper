@@ -35,7 +35,7 @@
 #ifndef TRAJECTORY_INTERFACE_H
 #define TRAJECTORY_INTERFACE_H
 
-#define TRAJECTORY_PIPE_TOPIC	"/run/mpa/plan_msgs/"
+#define TRAJECTORY_PIPE_LOCATION	"/run/mpa/plan_msgs/"
 
 /**
  * Unique 32-bit number used to signal the beginning of a data packet while
@@ -54,11 +54,19 @@
 #define TRAJ_MAX_SEGMENTS			20
 
 
+#define TRAJ_CMD_LOAD_AND_START     0   //< load this trajectory, then immediately go into FOLLOWING_TRAJ state
+#define TRAJ_CMD_LOAD               1   //< load this trajectory, overwriting the current stored traj, then immediately go into PAUSED_TRAJ state
+#define TRAJ_CMD_APPEND             2   //< append this trajectory to the loaded trajectory, TODO
+#define TRAJ_CMD_PAUSE              3   //< regardless of current state, immediately go into PAUSED_TRAJ state
+#define TRAJ_CMD_START              4   //< if we have a loaded trajectory, immediately go into FOLLOWING_TRAJ state
+#define TRAJ_CMD_ESTOP              5   //< emergency halt. stop following, clear trajectory stored, and resets state
+
+
 // coefficients are INCREASING, e.g. x(t) = a + bt + ct^2 ...
 // time begins at 0 for each coefficient, and is valid up to duration_s
 // order of the polynomial is n_coef-1
 typedef struct poly_segment_t{
-	int n_coef;			//< number of segments, must be 0<n<=MAX_SEGMENTS
+	int n_coef;
 	double duration_s;
 	double cx[TRAJ_MAX_COEFFICIENTS];
 	double cy[TRAJ_MAX_COEFFICIENTS];
@@ -71,7 +79,8 @@ typedef struct poly_segment_t{
 typedef struct trajectory_t{
 	uint32_t magic_number;		///< Unique 32-bit number used to signal the beginning of a VIO packet while parsing a data stream.
 	int64_t creation_time_ns;	///< timestamp in monotonic time when the trajectory was planned, 0 if unknown
-	int n_segments;				//< number of segments, must be 0<n<=MAX_SEGMENTS
+	int n_segments;				///< number of segments, must be 0<n<=MAX_SEGMENTS
+    int traj_command;           ///< command field, specifies what px4 should be doing upon receiving this trajectory
 	poly_segment_t segments[TRAJ_MAX_SEGMENTS];
 } __attribute__((packed)) trajectory_t;
 
@@ -83,7 +92,7 @@ typedef struct trajectory_t{
 
 
 
-static inline trajectory_t* modal_trajectory_validate_pipe_data(char* data, int bytes, int* n_packets)
+static inline trajectory_t* pipe_validate_trajectory_t(char* data, int bytes, int* n_packets)
 {
 	// cast raw data from buffer to an vio_data_t array so we can read data
 	// without memcpy. Also write out packets read as 0 until we validate data.

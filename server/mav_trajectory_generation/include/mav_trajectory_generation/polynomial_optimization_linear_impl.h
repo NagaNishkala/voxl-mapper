@@ -449,7 +449,7 @@ void PolynomialOptimization<_N>::
         std::vector<double>* candidates) {
     if(candidates == nullptr){
         fprintf(stderr, "candidates is a nullptr: %s\n", __FUNCTION__);
-        return false;
+        return;
     }
     // Start is candidate.
     candidates->push_back(t_start);

@@ -1,0 +1,12 @@
+0.0.5
+    * patch for vvpx4 trajectory_interface updates
+0.0.4
+    * support up to 5 depth inputs, 4 of which are generic pointcloud topics
+    * individual data rates per pipe
+    * mesh/visual generation + esdf updates in own thread
+0.0.3
+    * stereo / tof option, new template
+0.0.2
+    * loco tuning, skeleton removal, rrt* improvements, pointcloud downsampling algo added
+0.0.1
+    * initial release, mapping and path planning

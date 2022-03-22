@@ -22,8 +22,6 @@ target_link_libraries(${TARGET}
     mav_path_smoothing
     mav_local_planner
     gomp
-    # voxblox_skeleton
-    # voxblox_skeleton_planner
 )
 
 install(
