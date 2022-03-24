@@ -360,9 +360,9 @@ void TsdfServer::_stereo_pc_helper_cb(__attribute__((unused)) int ch, point_clou
 
     if (server->planning) return;
 
-    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
-    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
-    static int aligned_index = server->get_index_by_ch(ch);
+    rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    int aligned_index = server->get_index_by_ch(ch);
 
     //check if falling behind
     if (pipe_client_bytes_in_pipe(ch) > 0){
