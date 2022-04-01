@@ -724,13 +724,16 @@ void TsdfServer::integratePointcloud(const Transformation &T_G_C, const Pointclo
 void TsdfServer::publish2DCostmap()
 {
     pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
+    point_xyz_i pt_;
+    pt_.x = curr_pose.x();
+    pt_.y = curr_pose.y();
     float height = curr_pose.z();
     pthread_mutex_unlock(&pose_mutex); // return mutex lock
     if (planning) return; //|| keep_checking) return;
 
     if (en_debug) printf("Generating CostMap\n");
     uint64_t start_time = rc_nanos_monotonic_time();
-    create2DCostmap(esdf_map_->getEsdfLayer(), height, 0.20, cost_map, costmap_updates_only);
+    create2DCostmap(esdf_map_->getEsdfLayer(), height, cost_map, costmap_updates_only);
     uint64_t end_time = rc_nanos_monotonic_time();
     if (en_timing){
         printf("Generating CostMap Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
@@ -749,11 +752,6 @@ void TsdfServer::publish2DCostmap()
         cost_map_ptc.push_back(pt);
     }
 
-    point_xyz_i pt_;
-    pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-    pt_.x = curr_pose.x();
-    pt_.y = curr_pose.y();
-    pthread_mutex_unlock(&pose_mutex); // return mutex lock
     pt_.z = 0.0;
     pt_.intensity = 0;
     cost_map_ptc.push_back(pt_);

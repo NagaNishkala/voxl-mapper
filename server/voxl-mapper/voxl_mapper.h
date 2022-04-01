@@ -122,7 +122,7 @@ protected:
     mav_trajectory_generation::Trajectory path_to_follow;
 
     // costmap
-    std::unordered_map<std::pair<double, double>, double, hash_pair> cost_map;
+    std::unordered_map<std::pair<float, float>, float, hash_pair> cost_map;
 };
 
 } // namespace voxblox
