@@ -92,6 +92,7 @@ protected:
 
     /// base costmap built, can do incremental updates from now on (when true)
     bool costmap_updates_only;
+    float costmap_height=50.0;
 
     // Maps and integrators.
     std::shared_ptr<TsdfMap> tsdf_map_;

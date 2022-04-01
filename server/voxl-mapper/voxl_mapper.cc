@@ -50,16 +50,17 @@
 #define MPA_DEPTH_3_CH     12
 
 // control stuff
-#define PLAN_HOME       "plan_home"
-#define RESET_VIO       "reset_vio"
-#define SAVE_MAP        "save_map"
-#define LOAD_MAP        "load_map"
-#define CLEAR_MAP       "clear_map"
-#define PLAN_TO         "plan_to"
-#define FOLLOW_PATH     "follow_path"
+#define PLAN_HOME           "plan_home"
+#define RESET_VIO           "reset_vio"
+#define SAVE_MAP            "save_map"
+#define LOAD_MAP            "load_map"
+#define CLEAR_MAP           "clear_map"
+#define PLAN_TO             "plan_to"
+#define FOLLOW_PATH         "follow_path"
+#define SLICE_LVL_UPDATE    "slice_level:"
 
 
-#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH)
+#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH "," SLICE_LVL_UPDATE)
 
 pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t esdf_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -723,13 +724,25 @@ void TsdfServer::integratePointcloud(const Transformation &T_G_C, const Pointclo
 
 void TsdfServer::publish2DCostmap()
 {
-    pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-    point_xyz_i pt_;
-    pt_.x = curr_pose.x();
-    pt_.y = curr_pose.y();
-    float height = curr_pose.z();
-    pthread_mutex_unlock(&pose_mutex); // return mutex lock
-    if (planning) return; //|| keep_checking) return;
+    static uint8_t counter = 0;
+    static Eigen::Vector3d lower_bound;
+    static Eigen::Vector3d upper_bound;
+
+    if (counter % 5 == 0){ // this needs to be dialed in, not sure if every 5 cmaps is good enough to regauge scale
+        voxblox::utils::computeMapBoundsFromLayer(*esdf_map_->getEsdfLayerPtr(), &lower_bound, &upper_bound);
+        counter = 0;
+        costmap_updates_only = false;
+    }
+    else counter++;
+
+    // basic logic here:
+    // receive a costmap_height val from 0-100, scale it within the actual map_bounds (deflated, also needs to be dialed in)
+    float height = upper_bound.z()-1.0;
+    float dif = (float)(upper_bound.z()-lower_bound.z()-2.0);
+    dif *= (costmap_height/100);
+    height -= dif;
+
+    if (planning) return;
 
     if (en_debug) printf("Generating CostMap\n");
     uint64_t start_time = rc_nanos_monotonic_time();
@@ -741,18 +754,23 @@ void TsdfServer::publish2DCostmap()
 
     costmap_updates_only = true;
 
-    std::vector<point_xyz_i> cost_map_ptc;
+    static std::vector<point_xyz_i> cost_map_ptc;
 
     for (auto it: cost_map){
         point_xyz_i pt;
         pt.x = it.first.first;
         pt.y = it.first.second;
-        pt.z = 0.0;
+        pt.z = voxel_size; // will be converted to 0, but portal needs to be aware of our map granularity
         pt.intensity = it.second;
         cost_map_ptc.push_back(pt);
     }
 
-    pt_.z = 0.0;
+    point_xyz_i pt_;
+    pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
+    pt_.x = curr_pose.x();
+    pt_.y = curr_pose.y();
+    pthread_mutex_unlock(&pose_mutex); // return mutex lock
+    pt_.z = voxel_size; // same as above pt.z
     pt_.intensity = 0;
     cost_map_ptc.push_back(pt_);
 
@@ -764,6 +782,7 @@ void TsdfServer::publish2DCostmap()
     costmap_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZC;
 
     pipe_server_write_point_cloud(COSTMAP_CH, costmap_meta, cost_map_ptc.data());
+    cost_map_ptc.clear();
 }
 
 void TsdfServer::updateEsdf(bool clear_updated_flag)
@@ -959,7 +978,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 	    server->clear();
 		return;
 	}
-    else if(strncmp(string, "plan_to", 7)==0){
+    else if(strncmp(string, PLAN_TO, 7)==0){
         server->planning = true;
 
 		printf("Client requested plan to location\n");
@@ -1001,6 +1020,17 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 	else if(strcmp(string, FOLLOW_PATH)==0){
         fprintf(stderr, "Client requested to follow last path\n");
         server->followPath();
+        return;
+    }
+    else if(strncmp(string, SLICE_LVL_UPDATE, 12)==0){
+        fprintf(stderr, "Client requested slice level update\n");
+        char* goal_ptr;
+        goal_ptr = strtok (string, ":");
+        goal_ptr = strtok (NULL, ":");
+        std::string goal_str(goal_ptr);
+        double height = std::stod(goal_str);
+        server->costmap_height = height;
+        server->costmap_updates_only = false;
         return;
     }
     else if (server->en_debug){
