@@ -90,27 +90,27 @@ TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::
 
     // tof has a seperate cb over regular depth ptc
     if (tof_enable){
-        pipe_client_set_simple_helper_cb(MPA_TOF_CH, _pc_helper_cb, this);
+        pipe_client_set_simple_helper_cb(MPA_TOF_CH, _tof_helper_cb, this);
         pipe_client_set_connect_cb(MPA_TOF_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_TOF_CH, _pc_disconnect_cb, this);
     }
     if (depth_pipe_0_enable){
-        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_0_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_0_CH, depth_helper0, this);
         pipe_client_set_connect_cb(MPA_DEPTH_0_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_DEPTH_0_CH, _pc_disconnect_cb, this);
     }
     if (depth_pipe_1_enable){
-        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_1_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_1_CH, depth_helper1, this);
         pipe_client_set_connect_cb(MPA_DEPTH_1_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_DEPTH_1_CH, _pc_disconnect_cb, this);
     }
     if (depth_pipe_2_enable){
-        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_2_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_2_CH, depth_helper2, this);
         pipe_client_set_connect_cb(MPA_DEPTH_2_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_DEPTH_2_CH, _pc_disconnect_cb, this);
     }
     if (depth_pipe_3_enable){
-        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_3_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_3_CH, depth_helper3, this);
         pipe_client_set_connect_cb(MPA_DEPTH_3_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_DEPTH_3_CH, _pc_disconnect_cb, this);
     }
@@ -202,11 +202,13 @@ void TsdfServer::_pc_connect_cb(__attribute__((unused)) int ch, __attribute__((u
     return;
 }
 
-void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context){
+void TsdfServer::_tof_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context){
     static int64_t prev_ts = 0;
     //class instance
     TsdfServer *server = (TsdfServer *)context;
 
+    // can do this statically since this is not a shared cb
+    // only one tof input as of now
     static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
     static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
     static int aligned_index = server->get_index_by_ch(ch);
@@ -353,16 +355,52 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     return;
 }
 
-void TsdfServer::_stereo_pc_helper_cb(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+void TsdfServer::depth_helper0(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static TsdfServer *server = (TsdfServer *)context;
+
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
+    _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
+}
+
+void TsdfServer::depth_helper1(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static TsdfServer *server = (TsdfServer *)context;
+
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
+    _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
+}
+
+void TsdfServer::depth_helper2(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static TsdfServer *server = (TsdfServer *)context;
+
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
+    _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
+}
+
+void TsdfServer::depth_helper3(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static TsdfServer *server = (TsdfServer *)context;
+
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
+    _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
+}
+
+void TsdfServer::_stereo_pc_helper_cb( int ch, point_cloud_metadata_t &meta, rc_tf_t &tf_cam_wrt_body, int64_t &fixed_ts_dif, int &aligned_index, void* data, void* context){
     static int64_t prev_ts = 0;
     //class instance
     TsdfServer *server = (TsdfServer *)context;
 
     if (server->planning) return;
-
-    rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
-    int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
-    int aligned_index = server->get_index_by_ch(ch);
 
     //check if falling behind
     if (pipe_client_bytes_in_pipe(ch) > 0){
