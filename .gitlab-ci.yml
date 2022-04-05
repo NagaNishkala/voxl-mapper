@@ -7,20 +7,9 @@ include:
     file: '/pipeline-configs/cross-qrb5165.yml'
   - project: 'voxl-public/voxl-sdk/ci-tools'
     file: '/pipeline-configs/cross-apq8096.yml'
+  - project: 'voxl-public/voxl-sdk/ci-tools'
+    file: '/pipeline-configs/common.yml'
 
 variables:
     GIT_SUBMODULE_STRATEGY: recursive
 
-stages:
-    - build_cross_qrb5165_dev
-    - build_cross_qrb5165_stable
-    - nightly_cross_qrb5165_dev
-    - nightly_cross_qrb5165_staging
-    - deploy_cross_qrb5165_dev
-    - deploy_cross_qrb5165_stable
-    - build_cross_apq8096_dev
-    - build_cross_apq8096_stable
-    - nightly_cross_apq8096_dev
-    - nightly_cross_apq8096_stable
-    - deploy_cross_apq8096_dev
-    - deploy_cross_apq8096_stable

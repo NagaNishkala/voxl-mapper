@@ -1,4 +1,6 @@
 0.0.6
+    * New CI Stuff
+0.0.6
     * costmap slider level control cmds added, calculating relative height based on map bounds
     * costmap sending voxel_size in z coords
     * costmap doubles->floats
