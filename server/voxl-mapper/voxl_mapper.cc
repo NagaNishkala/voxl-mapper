@@ -50,16 +50,17 @@
 #define MPA_DEPTH_3_CH     12
 
 // control stuff
-#define PLAN_HOME       "plan_home"
-#define RESET_VIO       "reset_vio"
-#define SAVE_MAP        "save_map"
-#define LOAD_MAP        "load_map"
-#define CLEAR_MAP       "clear_map"
-#define PLAN_TO         "plan_to"
-#define FOLLOW_PATH     "follow_path"
+#define PLAN_HOME           "plan_home"
+#define RESET_VIO           "reset_vio"
+#define SAVE_MAP            "save_map"
+#define LOAD_MAP            "load_map"
+#define CLEAR_MAP           "clear_map"
+#define PLAN_TO             "plan_to"
+#define FOLLOW_PATH         "follow_path"
+#define SLICE_LVL_UPDATE    "slice_level:"
 
 
-#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH)
+#define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH "," SLICE_LVL_UPDATE)
 
 pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t esdf_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -90,27 +91,27 @@ TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::
 
     // tof has a seperate cb over regular depth ptc
     if (tof_enable){
-        pipe_client_set_simple_helper_cb(MPA_TOF_CH, _pc_helper_cb, this);
+        pipe_client_set_simple_helper_cb(MPA_TOF_CH, _tof_helper_cb, this);
         pipe_client_set_connect_cb(MPA_TOF_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_TOF_CH, _pc_disconnect_cb, this);
     }
     if (depth_pipe_0_enable){
-        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_0_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_0_CH, depth_helper0, this);
         pipe_client_set_connect_cb(MPA_DEPTH_0_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_DEPTH_0_CH, _pc_disconnect_cb, this);
     }
     if (depth_pipe_1_enable){
-        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_1_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_1_CH, depth_helper1, this);
         pipe_client_set_connect_cb(MPA_DEPTH_1_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_DEPTH_1_CH, _pc_disconnect_cb, this);
     }
     if (depth_pipe_2_enable){
-        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_2_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_2_CH, depth_helper2, this);
         pipe_client_set_connect_cb(MPA_DEPTH_2_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_DEPTH_2_CH, _pc_disconnect_cb, this);
     }
     if (depth_pipe_3_enable){
-        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_3_CH, _stereo_pc_helper_cb, this);
+        pipe_client_set_point_cloud_helper_cb(MPA_DEPTH_3_CH, depth_helper3, this);
         pipe_client_set_connect_cb(MPA_DEPTH_3_CH, _pc_connect_cb, this);
         pipe_client_set_disconnect_cb(MPA_DEPTH_3_CH, _pc_disconnect_cb, this);
     }
@@ -202,11 +203,13 @@ void TsdfServer::_pc_connect_cb(__attribute__((unused)) int ch, __attribute__((u
     return;
 }
 
-void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context){
+void TsdfServer::_tof_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context){
     static int64_t prev_ts = 0;
     //class instance
     TsdfServer *server = (TsdfServer *)context;
 
+    // can do this statically since this is not a shared cb
+    // only one tof input as of now
     static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
     static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
     static int aligned_index = server->get_index_by_ch(ch);
@@ -353,16 +356,52 @@ void TsdfServer::_pc_helper_cb(__attribute__((unused)) int ch, char *data, int b
     return;
 }
 
-void TsdfServer::_stereo_pc_helper_cb(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+void TsdfServer::depth_helper0(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static TsdfServer *server = (TsdfServer *)context;
+
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
+    _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
+}
+
+void TsdfServer::depth_helper1(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static TsdfServer *server = (TsdfServer *)context;
+
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
+    _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
+}
+
+void TsdfServer::depth_helper2(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static TsdfServer *server = (TsdfServer *)context;
+
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
+    _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
+}
+
+void TsdfServer::depth_helper3(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context){
+    static TsdfServer *server = (TsdfServer *)context;
+
+    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
+    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+    static int aligned_index = server->get_index_by_ch(ch);
+
+    _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
+}
+
+void TsdfServer::_stereo_pc_helper_cb( int ch, point_cloud_metadata_t &meta, rc_tf_t &tf_cam_wrt_body, int64_t &fixed_ts_dif, int &aligned_index, void* data, void* context){
     static int64_t prev_ts = 0;
     //class instance
     TsdfServer *server = (TsdfServer *)context;
 
     if (server->planning) return;
-
-    static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
-    static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
-    static int aligned_index = server->get_index_by_ch(ch);
 
     //check if falling behind
     if (pipe_client_bytes_in_pipe(ch) > 0){
@@ -685,14 +724,29 @@ void TsdfServer::integratePointcloud(const Transformation &T_G_C, const Pointclo
 
 void TsdfServer::publish2DCostmap()
 {
-    pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-    float height = curr_pose.z();
-    pthread_mutex_unlock(&pose_mutex); // return mutex lock
-    if (planning) return; //|| keep_checking) return;
+    static uint8_t counter = 0;
+    static Eigen::Vector3d lower_bound;
+    static Eigen::Vector3d upper_bound;
+
+    if (counter % 5 == 0){ // this needs to be dialed in, not sure if every 5 cmaps is good enough to regauge scale
+        voxblox::utils::computeMapBoundsFromLayer(*esdf_map_->getEsdfLayerPtr(), &lower_bound, &upper_bound);
+        counter = 0;
+        costmap_updates_only = false;
+    }
+    else counter++;
+
+    // basic logic here:
+    // receive a costmap_height val from 0-100, scale it within the actual map_bounds (deflated, also needs to be dialed in)
+    float height = upper_bound.z()-1.0;
+    float dif = (float)(upper_bound.z()-lower_bound.z()-2.0);
+    dif *= (costmap_height/100);
+    height -= dif;
+
+    if (planning) return;
 
     if (en_debug) printf("Generating CostMap\n");
     uint64_t start_time = rc_nanos_monotonic_time();
-    create2DCostmap(esdf_map_->getEsdfLayer(), height, 0.20, cost_map, costmap_updates_only);
+    create2DCostmap(esdf_map_->getEsdfLayer(), height, cost_map, costmap_updates_only);
     uint64_t end_time = rc_nanos_monotonic_time();
     if (en_timing){
         printf("Generating CostMap Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
@@ -700,13 +754,13 @@ void TsdfServer::publish2DCostmap()
 
     costmap_updates_only = true;
 
-    std::vector<point_xyz_i> cost_map_ptc;
+    static std::vector<point_xyz_i> cost_map_ptc;
 
     for (auto it: cost_map){
         point_xyz_i pt;
         pt.x = it.first.first;
         pt.y = it.first.second;
-        pt.z = 0.0;
+        pt.z = voxel_size; // will be converted to 0, but portal needs to be aware of our map granularity
         pt.intensity = it.second;
         cost_map_ptc.push_back(pt);
     }
@@ -716,7 +770,7 @@ void TsdfServer::publish2DCostmap()
     pt_.x = curr_pose.x();
     pt_.y = curr_pose.y();
     pthread_mutex_unlock(&pose_mutex); // return mutex lock
-    pt_.z = 0.0;
+    pt_.z = voxel_size; // same as above pt.z
     pt_.intensity = 0;
     cost_map_ptc.push_back(pt_);
 
@@ -728,6 +782,7 @@ void TsdfServer::publish2DCostmap()
     costmap_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZC;
 
     pipe_server_write_point_cloud(COSTMAP_CH, costmap_meta, cost_map_ptc.data());
+    cost_map_ptc.clear();
 }
 
 void TsdfServer::updateEsdf(bool clear_updated_flag)
@@ -923,7 +978,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 	    server->clear();
 		return;
 	}
-    else if(strncmp(string, "plan_to", 7)==0){
+    else if(strncmp(string, PLAN_TO, 7)==0){
         server->planning = true;
 
 		printf("Client requested plan to location\n");
@@ -965,6 +1020,17 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 	else if(strcmp(string, FOLLOW_PATH)==0){
         fprintf(stderr, "Client requested to follow last path\n");
         server->followPath();
+        return;
+    }
+    else if(strncmp(string, SLICE_LVL_UPDATE, 12)==0){
+        fprintf(stderr, "Client requested slice level update\n");
+        char* goal_ptr;
+        goal_ptr = strtok (string, ":");
+        goal_ptr = strtok (NULL, ":");
+        std::string goal_str(goal_ptr);
+        double height = std::stod(goal_str);
+        server->costmap_height = height;
+        server->costmap_updates_only = false;
         return;
     }
     else if (server->en_debug){

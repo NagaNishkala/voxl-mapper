@@ -150,7 +150,7 @@ struct hash_pair {
     }
 };
 
-inline void createCostmapFromLayer(const Layer<EsdfVoxel>& layer, unsigned int free_plane_index, float free_plane_val, float robot_radius, std::unordered_map<std::pair<double, double>, double, hash_pair>& cost_map, bool only_updates)
+inline void createCostmapFromLayer(const Layer<EsdfVoxel>& layer, const unsigned int &free_plane_index, float &free_plane_val, std::unordered_map<std::pair<float, float>, float, hash_pair>& cost_map, bool &only_updates)
 {
     BlockIndexList blocks;
     if (only_updates) layer.getAllUpdatedBlocks(Update::kMap, &blocks);
@@ -178,15 +178,15 @@ inline void createCostmapFromLayer(const Layer<EsdfVoxel>& layer, unsigned int f
         for (size_t linear_index = 0; linear_index < num_voxels_per_block; ++linear_index) {
             Point coord = block.computeCoordinatesFromLinearIndex(linear_index);
             // not if the original gets modified by the cast
-            double x = (double)coord.x();
-            double y = (double)coord.y();
-            std::pair<double, double> curr_coords = std::make_pair(x, y);
-            double distance = 10.0;
+            float x = coord.x();
+            float y = coord.y();
+            std::pair<float, float> curr_coords = std::make_pair(x, y);
+            float distance = 10.0;
 
             const EsdfVoxel voxel = block.getVoxelByLinearIndex(linear_index);
             if (std::abs(coord(free_plane_index) - free_plane_val) <= block.voxel_size()) {
                 if (voxel.observed) {
-                    distance = std::abs(voxel.distance);
+                    distance = (float)std::abs(voxel.distance);
                 }
                 cost_map[curr_coords] = distance;
             }
@@ -195,15 +195,14 @@ inline void createCostmapFromLayer(const Layer<EsdfVoxel>& layer, unsigned int f
     return;
 }
 
-inline void create2DCostmap(const Layer<EsdfVoxel>& layer, float start_height, float robot_radius, std::unordered_map<std::pair<double, double>, double, hash_pair>& cost_map, bool only_updates)
+inline void create2DCostmap(const Layer<EsdfVoxel>& layer, float &start_height, std::unordered_map<std::pair<float, float>, float, hash_pair>& cost_map, bool &only_updates)
 {
-    float free_plane_val = start_height;
-    unsigned int free_plane_index = 2;
+    static const unsigned int free_plane_index = 2;
 
-    if (std::remainder(free_plane_val, layer.voxel_size()) < 1e-6f) {
-        free_plane_val += layer.voxel_size() / 2.0f;
+    if (std::remainder(start_height, layer.voxel_size()) < 1e-6f) {
+        start_height += layer.voxel_size() / 2.0f;
     }
-    createCostmapFromLayer(layer, free_plane_index, free_plane_val, robot_radius, cost_map, only_updates);
+    createCostmapFromLayer(layer, free_plane_index, start_height, cost_map, only_updates);
 
     return;
 }

@@ -28,13 +28,17 @@ public:
 
     /// mpa callbacks
     static void _pc_connect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context);
-    static void _pc_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context);
+    static void _tof_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context);
     static void _pc_disconnect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context);
     static void _vio_connect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context);
     static void _vio_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, __attribute__((unused)) void *context);
     static void _vio_disconnect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context);
     static void _control_pipe_cb(__attribute__((unused)) int ch, char* string, int bytes, __attribute__((unused)) void* context);
-    static void _stereo_pc_helper_cb(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
+    static void depth_helper0(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
+    static void depth_helper1(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
+    static void depth_helper2(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
+    static void depth_helper3(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
+    static void _stereo_pc_helper_cb( int ch, point_cloud_metadata_t &meta, rc_tf_t &tf_cam_wrt_body, int64_t &fixed_ts_dif, int &aligned_index, void* data, void* context);
     /// general mpa
     int initMPA();
     void closeMPA();
@@ -88,6 +92,7 @@ protected:
 
     /// base costmap built, can do incremental updates from now on (when true)
     bool costmap_updates_only;
+    float costmap_height=50.0;
 
     // Maps and integrators.
     std::shared_ptr<TsdfMap> tsdf_map_;
@@ -118,7 +123,7 @@ protected:
     mav_trajectory_generation::Trajectory path_to_follow;
 
     // costmap
-    std::unordered_map<std::pair<double, double>, double, hash_pair> cost_map;
+    std::unordered_map<std::pair<float, float>, float, hash_pair> cost_map;
 };
 
 } // namespace voxblox

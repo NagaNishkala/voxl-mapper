@@ -1,3 +1,11 @@
+0.0.6
+    * New CI Stuff
+0.0.6
+    * costmap slider level control cmds added, calculating relative height based on map bounds
+    * costmap sending voxel_size in z coords
+    * costmap doubles->floats
+    * updated depth_pipe cb flow
+    * NEEDS voxl-portal >= v0.2.4 for these features
 0.0.5
     * patch for vvpx4 trajectory_interface updates
 0.0.4
