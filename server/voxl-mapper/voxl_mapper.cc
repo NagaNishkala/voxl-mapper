@@ -863,15 +863,15 @@ void TsdfServer::clear(){
 
 // control listens for reset commands
 void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, \
-							 int bytes, __attribute__((unused)) void* context)
+                             int bytes, __attribute__((unused)) void* context)
 {
     TsdfServer *server = (TsdfServer *)context;
-	// remove the trailing newline from echo
-	if(bytes>1 && string[bytes-1]=='\n'){
-		string[bytes-1]=0;
-	}
-	if(strcmp(string, PLAN_HOME)==0){
-		printf("Client requested plan home.\n");
+    // remove the trailing newline from echo
+    if(bytes>1 && string[bytes-1]=='\n'){
+        string[bytes-1]=0;
+    }
+    if(strcmp(string, PLAN_HOME)==0){
+        printf("Client requested plan home.\n");
         server->planning = true;
         Eigen::Vector3d start_pose, goal_pose;
 
@@ -893,23 +893,23 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         pthread_mutex_unlock(&pose_mutex); // return mutex lock
         server->maiRRT(start_pose, goal_pose, server->getEsdfMapPtr(), &(server->path_to_follow));
         server->planning = false;
-		return;
-	}
-	else if(strcmp(string, RESET_VIO)==0){
-		printf("Client requested vio reset.\n");
+        return;
+    }
+    else if(strcmp(string, RESET_VIO)==0){
+        printf("Client requested vio reset.\n");
         int fd = open(QVIO_SIMPLE_LOCATION "control", O_WRONLY);
         if(fd<0){
-    		fprintf(stderr, "make sure voxl-qvio-server is running\n");
-    	    return;
+            fprintf(stderr, "make sure voxl-qvio-server is running\n");
+            return;
         }
 
         int ret = write(fd, RESET_VIO_HARD, strlen(RESET_VIO_HARD)+1);
         if (ret <=0) fprintf(stderr, "failed to write to control pipe\n");
         close(fd);
-		return;
-	}
-	else if(strncmp(string, SAVE_MAP, 8)==0){
-		printf("Client requested save map.\n");
+        return;
+    }
+    else if(strncmp(string, SAVE_MAP, 8)==0){
+        printf("Client requested save map.\n");
         server->updateMesh();
 
         char* f_name;
@@ -940,9 +940,9 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         // using default paths
         else server->saveMap(server->str_tsdf_save_path, server->str_esdf_save_path);
         return;
-	}
-	else if(strncmp(string, LOAD_MAP, 8)==0){
-		printf("Client requested load map.\n");
+    }
+    else if(strncmp(string, LOAD_MAP, 8)==0){
+        printf("Client requested load map.\n");
 
         char* f_name;
         f_name = strtok (string, ":");
@@ -971,17 +971,17 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         }
         // using default paths
         else server->loadMap(server->str_tsdf_save_path, server->str_esdf_save_path);
-		return;
-	}
-	else if(strcmp(string, CLEAR_MAP)==0){
-		printf("Client requested clear map.\n");
-	    server->clear();
-		return;
-	}
+        return;
+    }
+    else if(strcmp(string, CLEAR_MAP)==0){
+        printf("Client requested clear map.\n");
+        server->clear();
+        return;
+    }
     else if(strncmp(string, PLAN_TO, 7)==0){
         server->planning = true;
 
-		printf("Client requested plan to location\n");
+        printf("Client requested plan to location\n");
 
         Eigen::Vector3d start_pose, goal_pose;
 
@@ -1015,9 +1015,9 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
         server->maiRRT( start_pose, goal_pose, server->getEsdfMapPtr(), &(server->path_to_follow));
 
         server->planning = false;
-		return;
-	}
-	else if(strcmp(string, FOLLOW_PATH)==0){
+        return;
+    }
+    else if(strcmp(string, FOLLOW_PATH)==0){
         fprintf(stderr, "Client requested to follow last path\n");
         server->followPath();
         return;
@@ -1035,10 +1035,10 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
     }
     else if (server->en_debug){
         printf("WARNING: Server received unknown command through the control pipe!\n");
-	    printf("got %d bytes. Command is: %s\n", bytes, string);
+        printf("got %d bytes. Command is: %s\n", bytes, string);
     }
 
-	return;
+    return;
 }
 
 bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, std::shared_ptr<EsdfMap> esdf_map_ptr, mav_trajectory_generation::Trajectory* path_to_follow){
