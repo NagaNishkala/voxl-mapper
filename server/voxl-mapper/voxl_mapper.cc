@@ -2,7 +2,6 @@
 #include "conversions.h"
 #include "mesh_vis.h"
 #include "ptcloud_vis.h"
-#include "rrt.h"
 #include "obs_pc_filter.h"
 #include "trajectory_interface.h"
 #include <unistd.h>
@@ -10,6 +9,7 @@
 #include <unordered_map>
 #include <mav_local_planner/conversions.h>
 #include <mav_trajectory_generation/trajectory_sampling.h>
+#include <global_planners/rrt_connect.h>
 
 
 
@@ -987,7 +987,8 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
 
-        start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
+        // TODO: REMOVE THE + 1 ON THE Z POSE
+        start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z() - 1;
 
         char* goal_ptr;
         goal_ptr = strtok (string, ":");
@@ -1042,54 +1043,41 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 }
 
 bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, std::shared_ptr<EsdfMap> esdf_map_ptr, mav_trajectory_generation::Trajectory* path_to_follow){
-    RRTSTAR* path_gen = new RRTSTAR(start_pose, goal_pose, esdf_map_ptr);
+    GlobalPlanner* planner = new RRTConnect(esdf_map_ptr, RENDER_CH);
+
 
     if (en_debug) fprintf(stderr, "STARTING SOLVE\n");
 
-    path_gen->Solve(path_to_follow);
+    bool success = planner->createPlan(start_pose, goal_pose, *path_to_follow);
 
     esdf_map_ptr.reset();
 
-    std::vector<point_xyz> raw_waypoints;
-    for (int i = 0; i < path_gen->path.size(); i++){
-        point_xyz pt;
-        pt.x = path_gen->path[i]->position.x();
-        pt.y = path_gen->path[i]->position.y();
-        pt.z = path_gen->path[i]->position.z();
-        raw_waypoints.push_back(pt);
-    }
+    delete planner;
 
-    std::vector<point_xyz> ptcloud_loco;
-    for (const auto& trajectory_point : path_gen->loco_path) {
-        point_xyz pt;
-        pt.x = trajectory_point.position_W.x();
-        pt.y = trajectory_point.position_W.y();
-        pt.z = trajectory_point.position_W.z();
-        ptcloud_loco.push_back(pt);
-    }
+    return success;
 
-    // *NOTE* using ts as format to specify type of path for voxl-portal
-    // 0 - raw waypoints
-    // 2 - loco smoothed path
-    // 6 - rrt star tree as building (not sent here)
+    // // *NOTE* using ts as format to specify type of path for voxl-portal
+    // // 0 - raw waypoints
+    // // 2 - loco smoothed path
+    // // 6 - rrt star tree as building (not sent here)
 
-    point_cloud_metadata_t waypoints_meta;
-    waypoints_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
-    waypoints_meta.n_points = raw_waypoints.size();
-    waypoints_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
-    waypoints_meta.timestamp_ns = 0;
+    // point_cloud_metadata_t waypoints_meta;
+    // waypoints_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
+    // waypoints_meta.n_points = raw_waypoints.size();
+    // waypoints_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
+    // waypoints_meta.timestamp_ns = 0;
 
-    if (waypoints_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, waypoints_meta, raw_waypoints.data());
+    // if (waypoints_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, waypoints_meta, raw_waypoints.data());
 
-    waypoints_meta.n_points = ptcloud_loco.size();
-    waypoints_meta.timestamp_ns = 1;
-    if (waypoints_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, waypoints_meta, ptcloud_loco.data());
+    // waypoints_meta.n_points = ptcloud_loco.size();
+    // waypoints_meta.timestamp_ns = 1;
+    // if (waypoints_meta.n_points != 0) pipe_server_write_point_cloud(RENDER_CH, waypoints_meta, ptcloud_loco.data());
 
-    int ret = path_gen->reached();
-    delete path_gen;
-    path_gen = NULL;
+    // int ret = path_gen->reached();
+    // delete path_gen;
+    // path_gen = NULL;
 
-    return ret;
+    // return ret;
 }
 
 bool TsdfServer::followPath()

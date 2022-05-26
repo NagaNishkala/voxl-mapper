@@ -11,12 +11,13 @@
 #include <modal_pipe_interfaces.h>
 #include <ptcloud_vis.h>
 
-typedef struct Node
+struct Node
 {
-    std::vector<Node *> children;
-    Node *parent = NULL;
     Eigen::Vector3d position;
-} Node;
+    Node *parent;
+    std::vector<Node *> children;
+    int id;
+};
 
 class RRTConnect : public GlobalPlanner
 {
@@ -37,6 +38,7 @@ private:
     double getMapDistance(const Eigen::Vector3d &position);
     double getMapDistanceAndGradient(const Eigen::Vector3d& position, Eigen::Vector3d* gradient);
 
+    Node *createNewNode(const Eigen::Vector3d& position, Node* parent);
     Node *getRandomNode();
 
     std::pair<Node *, double> findNearest(const Eigen::Vector3d &point);
@@ -68,6 +70,7 @@ private:
     std::vector<Node *> rrt_path_;
     mav_msgs::EigenTrajectoryPointVector smoothed_path_;
     Node *root_;
+    int node_counter_;
 
     int vis_channel_;
 

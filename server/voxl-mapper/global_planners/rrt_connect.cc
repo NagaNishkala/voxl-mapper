@@ -12,7 +12,11 @@ static uint64_t rc_nanos_monotonic_time()
     return ((uint64_t)ts.tv_sec * 1000000000) + ts.tv_nsec;
 }
 
-RRTConnect::RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map_, int vis_channel) : esdf_map_(esdf_map_), root_(nullptr), vis_channel_(vis_channel)
+RRTConnect::RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map_, int vis_channel)
+    : esdf_map_(esdf_map_),
+      root_(nullptr),
+      node_counter_(-2), // Set to -2 so that -2 is start and -1 is goal
+      vis_channel_(vis_channel)
 {
     // Set the random seed
     srand((unsigned)time(NULL));
@@ -54,7 +58,8 @@ bool RRTConnect::computeMapBounds()
     return true;
 }
 
-void RRTConnect::setupSmoother() {
+void RRTConnect::setupSmoother()
+{
     mav_planning::locoParams loco_params;
     loco_params.resample_trajectory_ = loco_resample_trajectory;
     loco_params.num_segments_ = loco_num_segments;
@@ -69,7 +74,7 @@ void RRTConnect::setupSmoother() {
 
     loco_smoother_.loco_config.polynomial_degree = loco_poly_degree;
     loco_smoother_.loco_config.derivative_to_optimize = loco_derivative_to_optimize;
-    loco_smoother_.loco_config.robot_radius = (robot_radius*2.0);
+    loco_smoother_.loco_config.robot_radius = (robot_radius * 1.5);
     loco_smoother_.loco_config.w_d = loco_smoothness_cost_weight;
     loco_smoother_.loco_config.w_c = loco_collision_cost_weight;
     loco_smoother_.loco_config.w_w = loco_waypoint_cost_weight;
@@ -77,22 +82,28 @@ void RRTConnect::setupSmoother() {
 
 bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end)
 {
-    std::cerr << std::endl;
     double dist = distance(start, end);
 
-    fprintf(stderr, "dist = %f\n", dist);
+    // fprintf(stderr, "dist = %f\n", dist);
 
-    int num_of_steps = std::max(round((float)dist / voxel_size), 1.0);
+    int num_of_steps = round(dist / robot_radius);
 
-    Eigen::Vector3d dir_vec = (end - start) / dist;
-    Eigen::Vector3d pos = start + dir_vec;
+    // Must always at least check the end point
+    if (num_of_steps <= 1)
+    {
+        return detectCollision(end);
+    }
+
+    // A direction vector with length of robot radius
+    Eigen::Vector3d step_vec = ((end - start) / dist) * robot_radius;
+    Eigen::Vector3d pos = start + step_vec;
 
     for (int i = 0; i < num_of_steps; i++)
     {
         if (detectCollision(pos))
             return true;
 
-        pos += dir_vec;
+        pos += step_vec;
     }
 
     return false;
@@ -100,10 +111,8 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
 
 bool RRTConnect::detectCollision(const Eigen::Vector3d &pos)
 {
-    fprintf(stderr, "rr = %f, map = %f, col? = %d\n", robot_radius * 2, getMapDistance(pos), getMapDistance(pos) <= robot_radius * 2);
-
-    static double collision_radius = robot_radius * 2;
-    return getMapDistance(pos) <= collision_radius;
+    // fprintf(stderr, "rr = %f, map = %f, col? = %d\n", robot_radius, getMapDistance(pos), getMapDistance(pos) <= robot_radius * 2);
+    return getMapDistance(pos) <= robot_radius * 1.5;
 }
 
 double RRTConnect::getMapDistance(const Eigen::Vector3d &position)
@@ -122,15 +131,22 @@ double RRTConnect::getMapDistance(const Eigen::Vector3d &position)
     return fabs(dist);
 }
 
-double RRTConnect::getMapDistanceAndGradient(const Eigen::Vector3d& position, Eigen::Vector3d* gradient)
+double RRTConnect::getMapDistanceAndGradient(const Eigen::Vector3d &position, Eigen::Vector3d *gradient)
 {
     double distance = 0.0;
-    if (!(esdf_map_->getDistanceAndGradientAtPosition(position, false, &distance, gradient))) {
+    if (!(esdf_map_->getDistanceAndGradientAtPosition(position, false, &distance, gradient)))
+    {
         return 0.0;
     }
     return distance;
 }
 
+Node *RRTConnect::createNewNode(const Eigen::Vector3d &position, Node *parent)
+{
+    Node *new_node = new Node{.position = position, .parent = parent, .children = std::vector<Node *>(), .id = node_counter_};
+    node_counter_++;
+    return new_node;
+}
 
 Node *RRTConnect::getRandomNode()
 {
@@ -140,11 +156,7 @@ Node *RRTConnect::getRandomNode()
 
     Eigen::Vector3d rand_pt(roundf(x * 100) / 100, roundf(y * 100) / 100, roundf(z * 100) / 100);
 
-    Node *ret = new Node;
-    ret->position = rand_pt;
-    ret->parent = NULL;
-
-    return ret;
+    return createNewNode(rand_pt, nullptr);
 }
 
 std::pair<Node *, double> RRTConnect::findNearest(const Eigen::Vector3d &point)
@@ -265,11 +277,12 @@ void RRTConnect::add(Node *qNearest, Node *qNew)
 
 void RRTConnect::deleteNodes(Node *root)
 {
-    for (int i = 0; i < (int)root->children.size(); i++)
+    for (int i = 0; i < root->children.size(); i++)
     {
         deleteNodes(root->children[i]);
     }
     delete root;
+    root = nullptr;
 }
 
 void RRTConnect::nodesToEigen(mav_msgs::EigenTrajectoryPointVector &eigen_path)
@@ -291,9 +304,7 @@ void RRTConnect::nodesToEigen(mav_msgs::EigenTrajectoryPointVector &eigen_path)
 
 bool RRTConnect::locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoints, mav_msgs::EigenTrajectoryPointVector &path, mav_trajectory_generation::Trajectory &last_trajectory)
 {
-    fprintf(stderr, "waypoints = %lu\n", waypoints.size());
     bool got = loco_smoother_.getTrajectoryBetweenWaypoints(waypoints, &last_trajectory);
-    fprintf(stderr, "Finished Loco smooth\n");
 
     bool success = false;
     if (got)
@@ -302,7 +313,6 @@ bool RRTConnect::locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoint
         double sampling_interval = 0.05;
         success = mav_trajectory_generation::sampleWholeTrajectory(last_trajectory, sampling_interval, &path);
     }
-    fprintf(stderr, "Finished sample traj\n");
 
     return got && success;
 }
@@ -310,26 +320,24 @@ bool RRTConnect::locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoint
 bool RRTConnect::runSmoother(mav_trajectory_generation::Trajectory &trajectory)
 {
     fprintf(stderr, "Running Smoother\n");
+    uint64_t start_time = rc_nanos_monotonic_time();
 
     mav_msgs::EigenTrajectoryPointVector base_path;
 
     nodesToEigen(base_path);
-    
+
     bool loco_success = locoSmooth(base_path, smoothed_path_, trajectory);
 
     visualize();
 
-    // Cleanup the RRT tree
-    deleteNodes(root_);
-
     if (loco_success)
     {
-        fprintf(stderr, "Smoother finished succesfully");
+        fprintf(stderr, "Smoother finished succesfully in %6.2fms\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0);
         return true;
     }
     else
     {
-        fprintf(stderr, "Smoother failed");
+        fprintf(stderr, "Smoother failed and took %6.2fms\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0);
         return false;
     }
 }
@@ -364,15 +372,14 @@ void RRTConnect::visualize()
     // 2 - loco smoothed path
     // 6 - rrt star tree as building (not sent here)
 
-    fprintf(stderr, "rrt size = %lu, smooth size = %lu", rrt_path_.size(), smoothed_path_.size());
-
     point_cloud_metadata_t waypoints_meta;
     waypoints_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
     waypoints_meta.n_points = rrt_pc.size();
     waypoints_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
     waypoints_meta.timestamp_ns = 0;
 
-    if (waypoints_meta.n_points != 0) {
+    if (waypoints_meta.n_points != 0)
+    {
         pipe_server_write_point_cloud(vis_channel_, waypoints_meta, rrt_pc.data());
     }
 
@@ -385,14 +392,8 @@ void RRTConnect::visualize()
 bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector3d &endPos, mav_trajectory_generation::Trajectory &trajectory)
 {
     // Setup start and end nodes
-    Node *qStart = new Node;
-    qStart->parent = nullptr;
-    qStart->position = startPos;
-
-    Node *qGoal = new Node;
-    qGoal->parent = nullptr;
-    qGoal->position = endPos;
-
+    Node *qStart = createNewNode(startPos, nullptr);
+    Node *qGoal = createNewNode(endPos, nullptr);
     root_ = qStart;
 
     // Insert start into search structure
@@ -412,7 +413,6 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     }
 
     // Check if an immediate path from start to end exists
-    fprintf(stderr, "Checking for immedaite\n");
     if (!detectCollisionEdge(qStart->position, qGoal->position))
     {
         fprintf(stderr, "Immediate collision free path found!\n");
@@ -428,6 +428,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     Node *qConnect = nullptr;
     Node *qNear = nullptr;
     double dist = 0;
+    bool collision_found;
 
     while (rrt_max_runtime_nanoseconds == -1 || start_time + rrt_max_runtime_nanoseconds > rc_nanos_monotonic_time())
     {
@@ -439,49 +440,54 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
 
         if (qRand)
         {
+            collision_found = false;
+
             // Find nearest node in tree
             std::tie(qNear, dist) = findNearest(qRand->position);
 
-            Eigen::Vector3d dir_vec = qRand->position - qNear->position;
-            dir_vec /= dist;
+            Eigen::Vector3d dir_vec = (qRand->position - qNear->position) * rrt_min_distance;
 
             // Continually step towards qRand by rrt_min_distance and add a node if its collision free
             while ((qRand->position - qNear->position).squaredNorm() > pow(rrt_min_distance, 2))
             {
-                qConnect = new Node;
-                qConnect->position = qNear->position + rrt_min_distance * dir_vec;
-            
-                fprintf(stderr, "Checking for extend\n");
+                qConnect = createNewNode(qNear->position + rrt_min_distance * dir_vec, nullptr);
+
+                // fprintf(stderr, "\nChecking for extend\n");
                 if (!detectCollisionEdge(qConnect->position, qNear->position))
                 {
                     add(qNear, qConnect);
                     qNear = qConnect;
                 }
                 else
-                    break;
-            }
-
-            // Add the point itself
-            qConnect = qRand;
-
-            fprintf(stderr, "Checking for end\n");
-            if (!detectCollisionEdge(qConnect->position, qNear->position))
-            {
-                add(qNear, qConnect);
-                qNear = qConnect;
-
-                // If we ran goal biasing then the end point would be the goal, so exit
-                if (qConnect == qGoal)
                 {
+                    // The current node is in collision so it is not added to the tree and needs to be deleted
+                    delete qConnect;
+                    qConnect = nullptr;
+                    collision_found = true;
                     break;
                 }
+            }
+
+            // Add qRand only if the while loop succesfully finished and its collision free
+            if (!collision_found && !detectCollisionEdge(qRand->position, qNear->position))
+            {
+                add(qNear, qRand);
+
+                // If we ran goal biasing then the end point would be the goal, so exit
+                if (qRand == qGoal)
+                    break;
+            }
+            else if (qRand != qGoal)
+            {
+                // Delete qRand if we couldnt add to graph and it wasnt the goal node
+                delete qRand;
+                qRand = nullptr;
             }
 
             // Check if we can reach goal
             std::tie(qNear, dist) = findNearest(qGoal->position);
 
-
-            if (dist < GOAL_THRESHOLD)
+            if (dist <= GOAL_THRESHOLD)
             {
                 add(qNear, qGoal);
                 break;
@@ -493,11 +499,11 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
 
     if (qGoal->parent != nullptr)
     {
-        fprintf(stderr, "Solution found in %d attempts\n", attempts);
+        fprintf(stderr, "RRT solution found in %6.2fms and took %d attempts\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0, attempts);
     }
     else
     {
-        fprintf(stderr, "Solution not found. Planning exceeded %6.2fms and took %d attempts\n", rrt_max_runtime_nanoseconds / 1000000.0, attempts);
+        fprintf(stderr, "RRT solution not found. Planning exceeded %6.2fms and took %d attempts\n", rrt_max_runtime_nanoseconds / 1000000.0, attempts);
         return false;
     }
 
