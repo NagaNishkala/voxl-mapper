@@ -80,11 +80,14 @@ void RRTConnect::setupSmoother()
     loco_smoother_.loco_config.w_w = loco_waypoint_cost_weight;
 }
 
-bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end)
+bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end, bool isConnected = false)
 {
-    double dist = distance(start, end);
+    double dist;
 
-    // fprintf(stderr, "dist = %f\n", dist);
+    if (isConnected)
+        dist = rrt_min_distance;
+    else
+        dist = distance(start, end);
 
     int num_of_steps = round(dist / robot_radius);
 
@@ -111,7 +114,6 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
 
 bool RRTConnect::detectCollision(const Eigen::Vector3d &pos)
 {
-    // fprintf(stderr, "rr = %f, map = %f, col? = %d\n", robot_radius, getMapDistance(pos), getMapDistance(pos) <= robot_radius * 2);
     return getMapDistance(pos) <= robot_radius * 1.5;
 }
 
@@ -445,15 +447,14 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
             // Find nearest node in tree
             std::tie(qNear, dist) = findNearest(qRand->position);
 
-            Eigen::Vector3d dir_vec = (qRand->position - qNear->position) * rrt_min_distance;
+            Eigen::Vector3d dir_vec = ((qRand->position - qNear->position) / dist);
 
             // Continually step towards qRand by rrt_min_distance and add a node if its collision free
             while ((qRand->position - qNear->position).squaredNorm() > pow(rrt_min_distance, 2))
             {
                 qConnect = createNewNode(qNear->position + rrt_min_distance * dir_vec, nullptr);
 
-                // fprintf(stderr, "\nChecking for extend\n");
-                if (!detectCollisionEdge(qConnect->position, qNear->position))
+                if (!detectCollisionEdge(qNear->position, qConnect->position, true))
                 {
                     add(qNear, qConnect);
                     qNear = qConnect;

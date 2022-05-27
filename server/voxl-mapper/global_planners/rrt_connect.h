@@ -33,7 +33,7 @@ private:
     bool computeMapBounds();
     void setupSmoother();
 
-    bool detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end);
+    bool detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end, bool isConnected);
     bool detectCollision(const Eigen::Vector3d &pos);
     double getMapDistance(const Eigen::Vector3d &position);
     double getMapDistanceAndGradient(const Eigen::Vector3d& position, Eigen::Vector3d* gradient);
