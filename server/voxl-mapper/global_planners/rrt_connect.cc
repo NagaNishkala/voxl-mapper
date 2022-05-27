@@ -356,7 +356,23 @@ void RRTConnect::visualize()
         pt.y = rrt_path_[i]->position.y();
         pt.z = rrt_path_[i]->position.z();
         rrt_pc.push_back(pt);
+
+        if (i != 0)
+        {
+            point_xyz pt2;
+            pt2.x = rrt_path_[i]->position.x();
+            pt2.y = rrt_path_[i]->position.y();
+            pt2.z = rrt_path_[i]->position.z();
+            rrt_pc.push_back(pt2);
+        }
     }
+
+    point_xyz pt;
+    pt.x = rrt_path_.back()->position.x();
+    pt.y = rrt_path_.back()->position.y();
+    pt.z = rrt_path_.back()->position.z();
+
+    rrt_pc.push_back(pt);
 
     // Get Smoothed path points
     std::vector<point_xyz> smooth_path_pc;
@@ -378,12 +394,10 @@ void RRTConnect::visualize()
     waypoints_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
     waypoints_meta.n_points = rrt_pc.size();
     waypoints_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
-    waypoints_meta.timestamp_ns = 0;
+    waypoints_meta.timestamp_ns = 2;
 
     if (waypoints_meta.n_points != 0)
-    {
         pipe_server_write_point_cloud(vis_channel_, waypoints_meta, rrt_pc.data());
-    }
 
     waypoints_meta.n_points = smooth_path_pc.size();
     waypoints_meta.timestamp_ns = 1;
