@@ -883,7 +883,6 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         server->esdf_integrator_->addNewRobotPosition(Point(start_pose.x(), start_pose.y(), start_pose.z()));
         usleep(125000);
-        server->esdf_integrator_->addNewRobotPosition(Point(goal_pose.x(), goal_pose.y(), goal_pose.z()));
 
         server->updateEsdf(true);
 
@@ -1005,7 +1004,6 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         server->esdf_integrator_->addNewRobotPosition(Point(start_pose.x(), start_pose.y(), start_pose.z()));
         usleep(125000);
-        server->esdf_integrator_->addNewRobotPosition(Point(goal_pose.x(), goal_pose.y(), goal_pose.z()));
 
         server->updateEsdf(true);
 
