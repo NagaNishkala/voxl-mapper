@@ -4,6 +4,7 @@
 #include <float.h>
 
 #define GOAL_THRESHOLD 0.05
+#define RRT_PRUNE_ITERATIONS 100
 
 static uint64_t rc_nanos_monotonic_time()
 {
@@ -30,7 +31,7 @@ bool RRTConnect::computeMapBounds()
 {
     if (esdf_map_ == nullptr)
     {
-        fprintf(stderr, "ERROR: esdf map is nullptr, cannot compute map bounds.\n");
+        printf("ERROR: esdf map is nullptr, cannot compute map bounds.\n");
         return false;
     }
 
@@ -89,26 +90,25 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
     else
         dist = distance(start, end);
 
-    int num_of_steps = round(dist / robot_radius);
+    int num_of_steps = floor(dist / robot_radius);
 
-    // Must always at least check the end point
-    if (num_of_steps <= 1)
-    {
-        return detectCollision(end);
+    if (detectCollision(end)) {
+        return true;
     }
 
     // A direction vector with length of robot radius
-    Eigen::Vector3d step_vec = ((end - start) / dist) * robot_radius;
-    Eigen::Vector3d pos = start + step_vec;
+    Eigen::Vector3d dir_vec = ((end - start) / dist);
+    Eigen::Vector3d pos = start + dir_vec * robot_radius;
 
     for (int i = 0; i < num_of_steps; i++)
     {
         if (detectCollision(pos))
+        {
             return true;
+        }
 
-        pos += step_vec;
+        pos += dir_vec * robot_radius;
     }
-
     return false;
 }
 
@@ -130,7 +130,7 @@ double RRTConnect::getMapDistance(const Eigen::Vector3d &position)
         else
             return esdf_default_distance;
     }
-    return fabs(dist);
+    return dist;
 }
 
 double RRTConnect::getMapDistanceAndGradient(const Eigen::Vector3d &position, Eigen::Vector3d *gradient)
@@ -264,7 +264,7 @@ int RRTConnect::binSelect(int index)
 
 int RRTConnect::flatIndexfromPoint(const Eigen::Vector3d &point)
 {
-    voxblox::BlockIndex bi = voxblox::getGridIndexFromPoint<voxblox::BlockIndex>(point.cast<float>(), (1.0f / (voxels_per_side * voxel_size)));
+    voxblox::BlockIndex bi = esdf_map_->getEsdfLayerPtr()->computeBlockIndexFromCoordinates(point.cast<float>());
     return (bi.x() - ind_lower_[0]) + (bi.y() - ind_lower_[1] * d_x_) + ((bi.z() - ind_lower_[2]) * d_y_ * d_x_);
 }
 
@@ -321,7 +321,7 @@ bool RRTConnect::locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoint
 
 bool RRTConnect::runSmoother(mav_trajectory_generation::Trajectory &trajectory)
 {
-    fprintf(stderr, "Running Smoother\n");
+    printf("Running Smoother\n");
     uint64_t start_time = rc_nanos_monotonic_time();
 
     mav_msgs::EigenTrajectoryPointVector base_path;
@@ -330,21 +330,77 @@ bool RRTConnect::runSmoother(mav_trajectory_generation::Trajectory &trajectory)
 
     bool loco_success = locoSmooth(base_path, smoothed_path_, trajectory);
 
-    visualize();
+    visualizePaths();
+    visualizeMap();
 
     if (loco_success)
     {
-        fprintf(stderr, "Smoother finished succesfully in %6.2fms\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0);
+        printf("Smoother finished succesfully in %6.2fms\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0);
         return true;
     }
     else
     {
-        fprintf(stderr, "Smoother failed and took %6.2fms\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0);
+        printf("Smoother failed and took %6.2fms\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0);
         return false;
     }
 }
 
-void RRTConnect::visualize()
+void RRTConnect::pruneRRTPath()
+{
+    int prune_count = 0;
+
+    int index_a;
+    int index_b;
+
+    float shift_a;
+    float shift_b;
+
+    Eigen::Vector3d candidate_a;
+    Eigen::Vector3d candidate_b;
+
+    std::default_random_engine generator;
+    std::uniform_real_distribution<float> distribution(0.0, 1.0);
+
+    for (int i = 0; i < RRT_PRUNE_ITERATIONS; i++)
+    {
+        // Make sure index_b is always greater than index_a
+        index_a = rand() % (rrt_path_.size() - 2);
+        index_b = rand() % (rrt_path_.size() - 2 - index_a) + index_a + 1;
+
+        shift_a = distribution(generator);
+        shift_b = distribution(generator);
+
+        candidate_a = (1 - shift_a) * rrt_path_[index_a]->position + shift_a * rrt_path_[index_a + 1]->position;
+        candidate_b = (1 - shift_b) * rrt_path_[index_b]->position + shift_b * rrt_path_[index_b + 1]->position;
+
+        if (!detectCollisionEdge(candidate_a, candidate_b))
+        {
+            // Remove all intermediate nodes in rrt_path_ between A and B
+            while (index_b > index_a)
+            {
+                rrt_path_.erase(rrt_path_.begin() + index_b);
+                index_b--;
+            }
+
+            // Temp nodes only for inserting into the path
+            Node* new_a = createNewNode(candidate_a, nullptr);
+            Node* new_b = createNewNode(candidate_b, nullptr);
+
+            // Save the nodes so we can clean them up after
+            pruning_nodes_.push_back(new_a);
+            pruning_nodes_.push_back(new_b);
+
+            rrt_path_.insert(rrt_path_.begin() + index_a + 1, new_b);
+            rrt_path_.insert(rrt_path_.begin() + index_a + 1, new_a);
+
+            prune_count++;
+        }
+    }
+
+    printf("Pruned %d times", prune_count);
+}
+
+void RRTConnect::visualizePaths()
 {
 
     // Get RRT Tree points
@@ -403,6 +459,60 @@ void RRTConnect::visualize()
     waypoints_meta.timestamp_ns = 1;
     if (waypoints_meta.n_points != 0)
         pipe_server_write_point_cloud(vis_channel_, waypoints_meta, smooth_path_pc.data());
+
+}
+
+void RRTConnect::visualizeMap() {
+    std::vector<point_xyz_i> pc;
+
+    voxblox::BlockIndexList block_list;
+    voxblox::Layer<voxblox::EsdfVoxel>* layer = esdf_map_->getEsdfLayerPtr();
+    layer->getAllAllocatedBlocks(&block_list);
+    size_t vps = layer->voxels_per_side();
+    size_t num_voxels_per_block = vps * vps * vps;
+
+    voxblox::VoxelIndex a(1, 8, 9);
+    voxblox::VoxelIndex b(1, 7, 9);
+    voxblox::VoxelIndex c(2, 7, 9);
+    voxblox::VoxelIndex d(2, 6, 9);
+    voxblox::VoxelIndex e(2, 6, 10);
+    voxblox::VoxelIndex f(2, 5, 10);
+    voxblox::VoxelIndex g(2, 4, 10);
+    voxblox::VoxelIndexList vox_list = {a, b, c, d, e, f, g};
+
+    for (const voxblox::BlockIndex& block_index : block_list) {
+        const voxblox::Block<voxblox::EsdfVoxel>& block = layer->getBlockByIndex(block_index);
+
+        for (size_t i = 0u; i < num_voxels_per_block; ++i) {
+            const voxblox::EsdfVoxel& voxel = block.getVoxelByLinearIndex(i);
+            Eigen::Matrix<float, 3, 1> point = block.computeCoordinatesFromLinearIndex(i);
+
+            voxblox::VoxelIndex vi = block.computeVoxelIndexFromLinearIndex(i);
+
+            if (!voxel.observed)
+                continue;
+
+            if(std::find(vox_list.begin(), vox_list.end(), vi) == vox_list.end()) 
+                continue;
+
+            point_xyz_i pt;
+            pt.x = point.x();
+            pt.y = point.y();
+            pt.z = point.z();
+            pt.intensity = voxel.distance;
+            pc.push_back(pt);
+        }
+    }
+
+    point_cloud_metadata_t waypoints_meta;
+    waypoints_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
+    waypoints_meta.n_points = pc.size();
+    waypoints_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZC;
+    waypoints_meta.timestamp_ns = 3;
+
+    if (waypoints_meta.n_points != 0)
+        pipe_server_write_point_cloud(vis_channel_, waypoints_meta, pc.data());
+
 }
 
 bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector3d &endPos, mav_trajectory_generation::Trajectory &trajectory)
@@ -419,19 +529,19 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     // Ensure that the start and end point are collision free
     if (detectCollision(qStart->position))
     {
-        fprintf(stderr, "ERROR: Start point is in collision\n");
+        printf("ERROR: Start point is in collision\n");
         return false;
     }
     else if (detectCollision(qGoal->position))
     {
-        fprintf(stderr, "ERROR: End point is in collision\n");
+        printf("ERROR: End point is in collision\n");
         return false;
     }
 
     // Check if an immediate path from start to end exists
     if (!detectCollisionEdge(qStart->position, qGoal->position))
     {
-        fprintf(stderr, "Immediate collision free path found!\n");
+        printf("Immediate collision free path found!\n");
         rrt_path_.push_back(qStart);
         rrt_path_.push_back(qGoal);
 
@@ -484,7 +594,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
             }
 
             // Add qRand only if the while loop succesfully finished and its collision free
-            if (!collision_found && !detectCollisionEdge(qRand->position, qNear->position))
+            if (!collision_found && !detectCollisionEdge(qNear->position, qRand->position))
             {
                 add(qNear, qRand);
 
@@ -514,11 +624,11 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
 
     if (qGoal->parent != nullptr)
     {
-        fprintf(stderr, "RRT solution found in %6.2fms and took %d attempts\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0, attempts);
+        printf("RRT solution found in %6.2fms and took %d attempts\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0, attempts);
     }
     else
     {
-        fprintf(stderr, "RRT solution not found. Planning exceeded %6.2fms and took %d attempts\n", rrt_max_runtime_nanoseconds / 1000000.0, attempts);
+        printf("RRT solution not found. Planning exceeded %6.2fms and took %d attempts\n", rrt_max_runtime_nanoseconds / 1000000.0, attempts);
         return false;
     }
 
@@ -536,6 +646,8 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
 
     // Reverse path since we traveresed tree from leaf to root but we want root to leaf
     std::reverse(rrt_path_.begin(), rrt_path_.end());
+
+    pruneRRTPath();
 
     // Run smoother
     return runSmoother(trajectory);

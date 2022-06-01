@@ -52,7 +52,11 @@ private:
     bool locoSmooth(const mav_msgs::EigenTrajectoryPointVector &coordinate_path, mav_msgs::EigenTrajectoryPointVector &path, mav_trajectory_generation::Trajectory &last_trajectory);
     bool runSmoother(mav_trajectory_generation::Trajectory &trajectory);
 
-    void visualize();
+    void pruneRRTPath();
+    void cleanupPruning();
+
+    void visualizePaths();
+    void visualizeMap();
 
     inline double distance(const Eigen::Vector3d &start, const Eigen::Vector3d &end)
     {
@@ -68,6 +72,8 @@ private:
 
     std::vector<std::vector<Node *>> nodes_;
     std::vector<Node *> rrt_path_;
+    std::vector<Node *> test_path_;
+    std::vector<Node *> pruning_nodes_;
     mav_msgs::EigenTrajectoryPointVector smoothed_path_;
     Node *root_;
     int node_counter_;
