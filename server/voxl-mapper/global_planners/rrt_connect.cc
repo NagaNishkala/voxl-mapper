@@ -471,15 +471,6 @@ void RRTConnect::visualizeMap() {
     size_t vps = layer->voxels_per_side();
     size_t num_voxels_per_block = vps * vps * vps;
 
-    voxblox::VoxelIndex a(1, 8, 9);
-    voxblox::VoxelIndex b(1, 7, 9);
-    voxblox::VoxelIndex c(2, 7, 9);
-    voxblox::VoxelIndex d(2, 6, 9);
-    voxblox::VoxelIndex e(2, 6, 10);
-    voxblox::VoxelIndex f(2, 5, 10);
-    voxblox::VoxelIndex g(2, 4, 10);
-    voxblox::VoxelIndexList vox_list = {a, b, c, d, e, f, g};
-
     for (const voxblox::BlockIndex& block_index : block_list) {
         const voxblox::Block<voxblox::EsdfVoxel>& block = layer->getBlockByIndex(block_index);
 
@@ -487,12 +478,7 @@ void RRTConnect::visualizeMap() {
             const voxblox::EsdfVoxel& voxel = block.getVoxelByLinearIndex(i);
             Eigen::Matrix<float, 3, 1> point = block.computeCoordinatesFromLinearIndex(i);
 
-            voxblox::VoxelIndex vi = block.computeVoxelIndexFromLinearIndex(i);
-
             if (!voxel.observed)
-                continue;
-
-            if(std::find(vox_list.begin(), vox_list.end(), vi) == vox_list.end()) 
                 continue;
 
             point_xyz_i pt;
