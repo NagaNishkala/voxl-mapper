@@ -11,6 +11,8 @@
 #include <modal_pipe_interfaces.h>
 #include <ptcloud_vis.h>
 
+#include "timer.h"
+
 struct Node
 {
     Eigen::Vector3d position;
@@ -72,7 +74,6 @@ private:
 
     std::vector<std::vector<Node *>> nodes_;
     std::vector<Node *> rrt_path_;
-    std::vector<Node *> test_path_;
     std::vector<Node *> pruning_nodes_;
     mav_msgs::EigenTrajectoryPointVector smoothed_path_;
     Node *root_;
@@ -81,6 +82,8 @@ private:
     int vis_channel_;
 
     mav_planning::LocoSmoother loco_smoother_;
+
+    Timer timer;
 };
 
 #endif

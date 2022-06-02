@@ -69,7 +69,7 @@ void RRTConnect::setupSmoother()
     loco_params.split_at_collisions_ = loco_split_at_collisions;
 
     loco_smoother_.setParameters(loco_params);
-    // loco_smoother_.setMapDistanceCallback(std::bind(&RRTSTAR::getMapDistance, this, std::placeholders::_1));
+    // loco_smoother_.setMapDistanceCallback(std::bind(&RRTConnect::getMapDistance, this, std::placeholders::_1));
     loco_smoother_.setInCollisionCallback(std::bind(&RRTConnect::detectCollision, this, std::placeholders::_1));
     loco_smoother_.setDistanceAndGradientFunction(std::bind(&RRTConnect::getMapDistanceAndGradient, this, std::placeholders::_1, std::placeholders::_2));
 
@@ -83,6 +83,8 @@ void RRTConnect::setupSmoother()
 
 bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end, bool isConnected = false)
 {
+    //timer.start("Edge Collision Check");
+
     double dist;
 
     if (isConnected)
@@ -92,7 +94,9 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
 
     int num_of_steps = floor(dist / robot_radius);
 
-    if (detectCollision(end)) {
+    if (detectCollision(end))
+    {
+        //timer.stop("Edge Collision Check");
         return true;
     }
 
@@ -100,15 +104,50 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
     Eigen::Vector3d dir_vec = ((end - start) / dist);
     Eigen::Vector3d pos = start + dir_vec * robot_radius;
 
+    // ------------------ DEBUG -----------------
+    // int t = round(dist / 0.1);
+    // Eigen::Vector3d test_pos = start + dir_vec * 0.1;
+
+    // voxblox::Layer<voxblox::EsdfVoxel>* layer = esdf_map_->getEsdfLayerPtr();
+
+    // fprintf(stderr, "Running full line test w/ %d steps at distance = %f\n", t, dist);
+    // for (int i = 0; i < t; i++)
+    // {
+    //     voxblox::BlockIndex bi = layer->computeBlockIndexFromCoordinates(test_pos.cast<float>());
+    //     voxblox::Block<voxblox::EsdfVoxel>::ConstPtr block_ptr = layer->getBlockPtrByIndex(bi);
+
+    //     if (!block_ptr) {
+    //         fprintf(stderr, "Unallocated Block Index = %u, %u, %u\n", bi(0, 0), bi(1, 0), bi(2, 0));
+    //         continue;
+    //     }
+    //     voxblox::VoxelIndex voxel = layer->getBlockByIndex(bi).computeVoxelIndexFromCoordinates(test_pos.cast<float>());
+
+    //     fprintf(stderr, "Block Index = %u, %u, %u | Voxel Index = %u, %u, %u\n", bi(0, 0), bi(1, 0), bi(2, 0), voxel(0,0), voxel(1,0), voxel(2, 0));
+    //     fprintf(stderr, "pos = (%f, %f, %f), val = %f\n", test_pos.x(), test_pos.y(), test_pos.z(), getMapDistance(test_pos));
+
+    //     test_pos += dir_vec * 0.1;
+    // }
+    // fprintf(stderr, "Starting original w/ %d steps\n", num_of_steps);
+    // ------------------ DEBUG END -----------------
+
     for (int i = 0; i < num_of_steps; i++)
     {
+        // bool coll = detectCollision(pos);
+        // voxblox::BlockIndex bi = layer->computeBlockIndexFromCoordinates(pos.cast<float>());
+        // voxblox::VoxelIndex voxel = layer->getBlockByIndex(bi).computeVoxelIndexFromCoordinates(pos.cast<float>());
+
+        // fprintf(stderr, "Block Index = %u, %u, %u | Voxel Index = %u, %u, %u\n", bi(0, 0), bi(1, 0), bi(2, 0), voxel(0,0), voxel(1,0), voxel(2, 0));
+        // fprintf(stderr, "pos = (%f, %f, %f), col? = %d\n", pos.x(), pos.y(), pos.z(), coll);
         if (detectCollision(pos))
         {
+            //timer.stop("Edge Collision Check");
             return true;
         }
 
         pos += dir_vec * robot_radius;
     }
+
+    //timer.stop("Edge Collision Check");
     return false;
 }
 
@@ -130,6 +169,7 @@ double RRTConnect::getMapDistance(const Eigen::Vector3d &position)
         else
             return esdf_default_distance;
     }
+
     return dist;
 }
 
@@ -287,6 +327,14 @@ void RRTConnect::deleteNodes(Node *root)
     root = nullptr;
 }
 
+void RRTConnect::cleanupPruning() {
+    for (const auto& node : pruning_nodes_) {
+        delete node;
+    }
+
+    pruning_nodes_.clear();
+}
+
 void RRTConnect::nodesToEigen(mav_msgs::EigenTrajectoryPointVector &eigen_path)
 {
     // sanity checks
@@ -330,9 +378,6 @@ bool RRTConnect::runSmoother(mav_trajectory_generation::Trajectory &trajectory)
 
     bool loco_success = locoSmooth(base_path, smoothed_path_, trajectory);
 
-    visualizePaths();
-    visualizeMap();
-
     if (loco_success)
     {
         printf("Smoother finished succesfully in %6.2fms\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0);
@@ -358,21 +403,26 @@ void RRTConnect::pruneRRTPath()
     Eigen::Vector3d candidate_a;
     Eigen::Vector3d candidate_b;
 
+    // Generate between 0.2 and 0.8 otherwise we will have new nodes too close to the start nodes
     std::default_random_engine generator;
-    std::uniform_real_distribution<float> distribution(0.0, 1.0);
+    std::uniform_real_distribution<float> distribution(0.2, 0.8);
 
     for (int i = 0; i < RRT_PRUNE_ITERATIONS; i++)
     {
-        // Make sure index_b is always greater than index_a
+        // Pick two nodes at random (ensure index b is always greater than index a)
         index_a = rand() % (rrt_path_.size() - 2);
         index_b = rand() % (rrt_path_.size() - 2 - index_a) + index_a + 1;
 
+        // Generate a random shift along each nodes next edge
         shift_a = distribution(generator);
         shift_b = distribution(generator);
 
+        // Calculate new points along the edge using the shift
         candidate_a = (1 - shift_a) * rrt_path_[index_a]->position + shift_a * rrt_path_[index_a + 1]->position;
         candidate_b = (1 - shift_b) * rrt_path_[index_b]->position + shift_b * rrt_path_[index_b + 1]->position;
 
+        // The path between the two new positions is a shortcut. If its collision free, 
+        // add it into the path and remove the nodes that it skips
         if (!detectCollisionEdge(candidate_a, candidate_b))
         {
             // Remove all intermediate nodes in rrt_path_ between A and B
@@ -383,8 +433,8 @@ void RRTConnect::pruneRRTPath()
             }
 
             // Temp nodes only for inserting into the path
-            Node* new_a = createNewNode(candidate_a, nullptr);
-            Node* new_b = createNewNode(candidate_b, nullptr);
+            Node *new_a = createNewNode(candidate_a, nullptr);
+            Node *new_b = createNewNode(candidate_b, nullptr);
 
             // Save the nodes so we can clean them up after
             pruning_nodes_.push_back(new_a);
@@ -397,38 +447,21 @@ void RRTConnect::pruneRRTPath()
         }
     }
 
-    printf("Pruned %d times", prune_count);
+    printf("Pruned %d time\n", prune_count);
 }
 
 void RRTConnect::visualizePaths()
 {
-
     // Get RRT Tree points
     std::vector<point_xyz> rrt_pc;
-    for (int i = 0; i < rrt_path_.size(); i++)
+    for (const auto &rrt_node : rrt_path_)
     {
         point_xyz pt;
-        pt.x = rrt_path_[i]->position.x();
-        pt.y = rrt_path_[i]->position.y();
-        pt.z = rrt_path_[i]->position.z();
+        pt.x = rrt_node->position.x();
+        pt.y = rrt_node->position.y();
+        pt.z = rrt_node->position.z();
         rrt_pc.push_back(pt);
-
-        if (i != 0)
-        {
-            point_xyz pt2;
-            pt2.x = rrt_path_[i]->position.x();
-            pt2.y = rrt_path_[i]->position.y();
-            pt2.z = rrt_path_[i]->position.z();
-            rrt_pc.push_back(pt2);
-        }
     }
-
-    point_xyz pt;
-    pt.x = rrt_path_.back()->position.x();
-    pt.y = rrt_path_.back()->position.y();
-    pt.z = rrt_path_.back()->position.z();
-
-    rrt_pc.push_back(pt);
 
     // Get Smoothed path points
     std::vector<point_xyz> smooth_path_pc;
@@ -450,7 +483,7 @@ void RRTConnect::visualizePaths()
     waypoints_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
     waypoints_meta.n_points = rrt_pc.size();
     waypoints_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZ;
-    waypoints_meta.timestamp_ns = 2;
+    waypoints_meta.timestamp_ns = 0;
 
     if (waypoints_meta.n_points != 0)
         pipe_server_write_point_cloud(vis_channel_, waypoints_meta, rrt_pc.data());
@@ -459,23 +492,25 @@ void RRTConnect::visualizePaths()
     waypoints_meta.timestamp_ns = 1;
     if (waypoints_meta.n_points != 0)
         pipe_server_write_point_cloud(vis_channel_, waypoints_meta, smooth_path_pc.data());
-
 }
 
-void RRTConnect::visualizeMap() {
+void RRTConnect::visualizeMap()
+{
     std::vector<point_xyz_i> pc;
 
     voxblox::BlockIndexList block_list;
-    voxblox::Layer<voxblox::EsdfVoxel>* layer = esdf_map_->getEsdfLayerPtr();
+    voxblox::Layer<voxblox::EsdfVoxel> *layer = esdf_map_->getEsdfLayerPtr();
     layer->getAllAllocatedBlocks(&block_list);
     size_t vps = layer->voxels_per_side();
     size_t num_voxels_per_block = vps * vps * vps;
 
-    for (const voxblox::BlockIndex& block_index : block_list) {
-        const voxblox::Block<voxblox::EsdfVoxel>& block = layer->getBlockByIndex(block_index);
+    for (const voxblox::BlockIndex &block_index : block_list)
+    {
+        const voxblox::Block<voxblox::EsdfVoxel> &block = layer->getBlockByIndex(block_index);
 
-        for (size_t i = 0u; i < num_voxels_per_block; ++i) {
-            const voxblox::EsdfVoxel& voxel = block.getVoxelByLinearIndex(i);
+        for (size_t i = 0u; i < num_voxels_per_block; ++i)
+        {
+            const voxblox::EsdfVoxel &voxel = block.getVoxelByLinearIndex(i);
             Eigen::Matrix<float, 3, 1> point = block.computeCoordinatesFromLinearIndex(i);
 
             if (!voxel.observed)
@@ -498,11 +533,12 @@ void RRTConnect::visualizeMap() {
 
     if (waypoints_meta.n_points != 0)
         pipe_server_write_point_cloud(vis_channel_, waypoints_meta, pc.data());
-
 }
 
 bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector3d &endPos, mav_trajectory_generation::Trajectory &trajectory)
 {
+    //timer.start("RRT Planner");
+
     // Setup start and end nodes
     Node *qStart = createNewNode(startPos, nullptr);
     Node *qGoal = createNewNode(endPos, nullptr);
@@ -633,13 +669,27 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     // Reverse path since we traveresed tree from leaf to root but we want root to leaf
     std::reverse(rrt_path_.begin(), rrt_path_.end());
 
+    //timer.stop("RRT Planner");
+
+    //timer.start("Pruning");
     pruneRRTPath();
+    //timer.stop("Pruning");
 
     // Run smoother
-    return runSmoother(trajectory);
+    //timer.start("Smoother");
+    bool smoother_success = runSmoother(trajectory);
+    //timer.stop("Smoother");
+
+    //timer.printAllTimers();
+
+    visualizePaths();
+    // visualizeMap();
+
+    return smoother_success;
 }
 
 RRTConnect::~RRTConnect()
 {
     deleteNodes(root_);
+    cleanupPruning();
 }
