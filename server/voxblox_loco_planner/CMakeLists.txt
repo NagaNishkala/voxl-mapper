@@ -2,10 +2,6 @@ set(TARGET voxblox_loco_planner)
 file(GLOB all_src_files  "src/*.cpp")
 add_library(${TARGET} SHARED ${all_src_files})
 
-set(CMAKE_CXX_FLAGS "-std=gnu++11 -Wall -Wextra -Wuninitialized -Wattributes -Wno-unused-parameter \
-	-Wno-sign-compare -Wunused-but-set-variable -Wdouble-promotion -Wno-missing-field-initializers \
-	-Wmissing-declarations -Werror=undef -Wno-unused-function ${CMAKE_CXX_FLAGS}")
-
 target_include_directories(${TARGET} PUBLIC
     include/
 )

@@ -1,9 +1,5 @@
 set(TARGET voxl-mapper)
 
-set(CMAKE_CXX_FLAGS "-std=gnu++11 -Wall -Wextra -Wuninitialized -Wattributes -Wno-unused-parameter \
-	-Wno-sign-compare -Wunused-but-set-variable -Wdouble-promotion -Wno-missing-field-initializers \
-	-Wmissing-declarations -Werror=undef -Wno-unused-function ${CMAKE_CXX_FLAGS}")
-
 file(GLOB_RECURSE all_src_files "*.c" "*.cc")
 add_executable(${TARGET} ${all_src_files})
 
