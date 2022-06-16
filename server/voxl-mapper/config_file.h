@@ -90,13 +90,12 @@ extern float esdf_outer_sphere_radius;
 
 extern double rrt_min_distance;
 extern double rrt_max_runtime_nanoseconds;
-extern bool rrt_use_first_solution;
+extern double rrt_goal_threshold;
+extern int rrt_prune_iterations;
 extern bool rrt_treat_unknown_as_occupied;
-extern bool rrt_send_tree;
+extern bool rrt_send_map;
 
 extern int loco_num_segments;
-extern int loco_derivative_to_optimize;
-extern int loco_poly_degree;
 extern double loco_smoothness_cost_weight;
 extern double loco_collision_cost_weight;
 extern double loco_waypoint_cost_weight;
@@ -105,7 +104,14 @@ extern bool loco_add_waypoints;
 extern bool loco_scale_time;
 extern bool loco_split_at_collisions;
 extern bool loco_resample_trajectory;
+extern bool loco_resample_visibility;
 extern bool loco_verbose;
+
+extern bool loco_optimize_time;
+extern double loco_v_max; 
+extern double loco_a_max; 
+extern double loco_yaw_rate_max;
+extern double loco_sampling_dt;
 
 // read only our own config file without printing the contents
 int config_file_read(void);

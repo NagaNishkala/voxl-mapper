@@ -39,6 +39,44 @@
 #define CONFIG_FILE_HEADER "\
 /**\n\
  * This file contains configuration that's specific to voxl-mapper.\n\
+ * \n\
+ * RRT Parameters\n\
+ * rrt_max_runtime_nanoseconds:           Maximum amount of time allowed for the RRT planner to run. Default: 1000000000 \n\
+ * rrt_goal_threshold:                    Minimum distance to goal before a point is considered to be at the goal. Default: 0.05m \n\
+ * rrt_prune_iterations:                  Number of iterations to run pruning on the RRT path for. Default: 100 \n\
+ * rrt_treat_unknown_as_occupied:         Whether to treat unknown cells as occupied. Default: true \n\
+ * rrt_send_map:                          Enables publish of the ESDF map to voxl-portal. Default: false \n\
+ * \n\
+ * Smoother Parameters\n\
+ * loco_resample_trajectory: 	          If true will take the initial guess from the linear solver and resample the\n\
+ *                                        trajectory to get a new trajectory with num_segments in it that is then\n\
+ *                                        passed to the nonlinear solver. Default: true \n\
+ * loco_resample_visibility:              If true will resample before running the linear solver. Uses the visiblity \n\
+ *                                        graph and a time estimation of the entire path to resample points. the \n\
+ *                                        visibility graph is essentially the graph made up of the waypoints passed to \n\
+ *                                        the smoother. Default: false\n\
+ * loco_num_segments:                     The number of segments that the resampled trajectory will have (only applies \n\
+ *                                        if resample_trajectory is true. Default: 5\n\
+ * loco_add_waypoints:                    Adds waypoints into the nonlinear smoother to optimize passing through each \n\
+ *                                        waypoint. If disabled then waypoint cost weight has no effect. Default: false\n\
+ * loco_scale_time:                       Scales the segment times evenly to ensure that the trajectory is feasible \n\
+ *                                        given the provided v_max and a_max. Does not change the shape of the trajectory,\n\
+ *                                        and only increases segment times. Default: true\n\
+ * loco_optimize_time:                    Runs an additional optimization step (using nlopt) to optimize the segment \n\
+ *                                        times in order to better meet the dynamic constraints. Default: true\n\
+ * loco_split_at_collisions:              Adds additional points to the trajectory if any portion of the initial linear \n\
+ *                                        solvers trajectory is in collision. Default: true\n\
+ * loco_v_max:                            Max velocity of robot. Default: 1.0\n\
+ * loco_a_max:                            Max acceleration of robot. Default: 2.0\n\
+ * loco_yaw_rate_max:                     Max yaw rate of robot. Default: PI/4\n\
+ * loco_sampling_dt:                      Time step delta at which to sample points from the trajectory to check for collisions\n\
+ *                                        this is used in the linear solver and generally only when split at collisions is true\n\
+ *                                        Default: 0.1\n\
+ * loco_smoothness_cost_weight:           Weighting for smoothness of derivative we are optimizing for. Default: 0.1\n\
+ * loco_collision_cost_weight:            Weighting for collisions. Default: 10.0\n\
+ * loco_waypoint_cost_weight:             Weighting for waypoints (has no effect if add_waypoints_ is false). Default: 1.0\n\
+ * loco_min_collision_sampling_dist:      Time step delta at which to evaluate cost/gradient for collisions. Default: 0.1\n\
+ * loco_verbose:                          Whether to print debug statements or not. Default: false\n\
  */\n"
 
 
@@ -87,21 +125,27 @@ float esdf_outer_sphere_radius;
 
 double rrt_min_distance;
 double rrt_max_runtime_nanoseconds;
-bool rrt_use_first_solution;
+double rrt_goal_threshold;
+int rrt_prune_iterations;
 bool rrt_treat_unknown_as_occupied;
-bool rrt_send_tree;
+bool rrt_send_map;
 
+bool loco_resample_trajectory;
+bool loco_resample_visibility;
 int loco_num_segments;
-int loco_derivative_to_optimize;
-int loco_poly_degree;
+bool loco_add_waypoints;
+bool loco_scale_time;
+bool loco_optimize_time;
+bool loco_split_at_collisions;
+double loco_v_max;
+double loco_a_max;
+double loco_yaw_rate_max;
+double loco_sampling_dt;
+
 double loco_smoothness_cost_weight;
 double loco_collision_cost_weight;
 double loco_waypoint_cost_weight;
 double loco_min_collision_sampling_dist;
-bool loco_add_waypoints;
-bool loco_scale_time;
-bool loco_split_at_collisions;
-bool loco_resample_trajectory;
 bool loco_verbose;
 
 
@@ -267,13 +311,12 @@ int config_file_print(void){
     printf("============================RRT==================================\n");
     printf("rrt_min_distance:                 %0.3f\n", rrt_min_distance);
     printf("rrt_max_runtime_nanoseconds:      %0.3f\n", rrt_max_runtime_nanoseconds);
-    printf("rrt_use_first_solution:           %s\n", rrt_use_first_solution ? "true" : "false");
+    printf("rrt_goal_threshold:		          %0.3f\n", rrt_goal_threshold);
+    printf("rrt_prune_iterations:		      %d\n", rrt_prune_iterations);
     printf("rrt_treat_unknown_as_occupied:    %s\n", rrt_treat_unknown_as_occupied ? "true" : "false");
-    printf("rrt_send_tree:                    %s\n", rrt_send_tree ? "true" : "false");
+    printf("rrt_send_map:                     %s\n", rrt_send_map ? "true" : "false");
     printf("============================LOCO==================================\n");
     printf("loco_num_segments:                %d\n", loco_num_segments);
-    printf("loco_derivative_to_optimize:      %d\n", loco_derivative_to_optimize);
-    printf("loco_poly_degree:                 %d\n", loco_poly_degree);
     printf("loco_smoothness_cost_weight:      %0.3f\n", loco_smoothness_cost_weight);
     printf("loco_collision_cost_weight:       %0.3f\n", loco_collision_cost_weight);
     printf("loco_waypoint_cost_weight:        %0.3f\n", loco_waypoint_cost_weight);
@@ -282,7 +325,13 @@ int config_file_print(void){
     printf("loco_scale_time:                  %s\n", loco_scale_time ? "true" : "false");
     printf("loco_split_at_collisions:         %s\n", loco_split_at_collisions ? "true" : "false");
     printf("loco_resample_trajectory:         %s\n", loco_resample_trajectory ? "true" : "false");
+    printf("loco_resample_visibility:         %s\n", loco_resample_visibility ? "true" : "false");
     printf("loco_verbose:                     %s\n", loco_verbose ? "true" : "false");
+    printf("loco_optimize_time:               %s\n", loco_optimize_time ? "true" : "false");
+    printf("loco_v_max:                       %0.3f\n", loco_v_max);
+    printf("loco_a_max:                       %0.3f\n", loco_a_max);
+    printf("loco_yaw_rate_max:		          %0.3f\n", loco_yaw_rate_max);
+    printf("loco_sampling_dt:                 %0.3f\n", loco_sampling_dt);
 	printf("=================================================================\n\n");
 	return 0;
 }
@@ -340,22 +389,27 @@ int config_file_read(void)
 
 	json_fetch_double_with_default(parent, "rrt_min_distance", &rrt_min_distance, 0.2);
 	json_fetch_double_with_default(parent, "rrt_max_runtime_nanoseconds", &rrt_max_runtime_nanoseconds, 1000000000);
-	json_fetch_bool_with_default(parent, "rrt_use_first_solution", (int*)&rrt_use_first_solution, 0);
+	json_fetch_double_with_default(parent, "rrt_goal_threshold", &rrt_goal_threshold, 0.05);
+	json_fetch_int_with_default(parent, "rrt_prune_iterations", &rrt_prune_iterations, 100);
 	json_fetch_bool_with_default(parent, "rrt_treat_unknown_as_occupied", (int*)&rrt_treat_unknown_as_occupied, 1);
-	json_fetch_bool_with_default(parent, "rrt_send_tree", (int*)&rrt_send_tree, 0);
+	json_fetch_bool_with_default(parent, "rrt_send_map", (int*)&rrt_send_map, 0);
 
     json_fetch_int_with_default(parent, "loco_num_segments", &loco_num_segments, 10);
-    json_fetch_int_with_default(parent, "loco_derivative_to_optimize", &loco_derivative_to_optimize, 3);
-    json_fetch_int_with_default(parent, "loco_poly_degree", &loco_poly_degree, 10);
-	json_fetch_double_with_default(parent, "loco_smoothness_cost_weight", &loco_smoothness_cost_weight, 2.5);
-	json_fetch_double_with_default(parent, "loco_collision_cost_weight", &loco_collision_cost_weight, 14.0);
-	json_fetch_double_with_default(parent, "loco_waypoint_cost_weight", &loco_waypoint_cost_weight, 0.0);
-	json_fetch_double_with_default(parent, "loco_min_collision_sampling_dist", &loco_min_collision_sampling_dist, 0.05);
-	json_fetch_bool_with_default(parent, "loco_add_waypoints", (int*)&loco_add_waypoints, 1);
+	json_fetch_double_with_default(parent, "loco_smoothness_cost_weight", &loco_smoothness_cost_weight, 0.1);
+	json_fetch_double_with_default(parent, "loco_collision_cost_weight", &loco_collision_cost_weight, 10.0);
+	json_fetch_double_with_default(parent, "loco_waypoint_cost_weight", &loco_waypoint_cost_weight, 1.0);
+	json_fetch_double_with_default(parent, "loco_min_collision_sampling_dist", &loco_min_collision_sampling_dist, 0.1);
+	json_fetch_bool_with_default(parent, "loco_add_waypoints", (int*)&loco_add_waypoints, 0);
 	json_fetch_bool_with_default(parent, "loco_scale_time", (int*)&loco_scale_time, 1);
 	json_fetch_bool_with_default(parent, "loco_split_at_collisions", (int*)&loco_split_at_collisions, 1);
 	json_fetch_bool_with_default(parent, "loco_resample_trajectory", (int*)&loco_resample_trajectory, 1);
+	json_fetch_bool_with_default(parent, "loco_resample_visibility", (int*)&loco_resample_visibility, 0);
 	json_fetch_bool_with_default(parent, "loco_verbose", (int*)&loco_verbose, 0);
+	json_fetch_bool_with_default(parent, "loco_optimize_time", (int*)&loco_optimize_time, 1);
+	json_fetch_double_with_default(parent, "loco_v_max", &loco_v_max, 1.0);
+	json_fetch_double_with_default(parent, "loco_a_max", &loco_a_max, 2.0);
+	json_fetch_double_with_default(parent, "loco_yaw_rate_max", &loco_yaw_rate_max, M_PI / 4.0);
+	json_fetch_double_with_default(parent, "loco_sampling_dt", &loco_sampling_dt, 0.1);
 
 	if(json_get_parse_error_flag()){
 		fprintf(stderr, "failed to parse config file %s\n", CONF_FILE);

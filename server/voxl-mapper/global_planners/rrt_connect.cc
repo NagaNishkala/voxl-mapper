@@ -1,10 +1,9 @@
 #include "rrt_connect.h"
 #include <mav_trajectory_generation/trajectory_sampling.h>
 #include <voxblox/core/common.h>
+#include <random>
 #include <float.h>
-
-#define GOAL_THRESHOLD 0.05
-#define RRT_PRUNE_ITERATIONS 100
+#include <unistd.h>
 
 static uint64_t rc_nanos_monotonic_time()
 {
@@ -20,7 +19,7 @@ RRTConnect::RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map_, int vis_chan
       vis_channel_(vis_channel)
 {
     // Set the random seed
-    srand((unsigned)time(NULL));
+    srand(time(nullptr));
 
     computeMapBounds();
 
@@ -61,33 +60,96 @@ bool RRTConnect::computeMapBounds()
 
 void RRTConnect::setupSmoother()
 {
+    /** These are mainly used in the nonlinear smoothing:
+     * 
+     * resample_trajectory:     If true will take the initial guess from the linear solver and resample the 
+     *                          trajectory to get a new trajectory with num_segments in it that is then 
+     *                          passed to the nonlinear solver.
+     * resample_visibility:     If true will resample before running the linear solver. Uses the visiblity 
+     *                          graph and a time estimation of the entire path to resample points. the 
+     *                          visibility graph is essentially the graph made up of the waypoints passed to 
+     *                          the smoother.
+     * num_segments:            The number of segments that the resampled trajectory will have (only applies 
+     *                          if resample_trajectory is true.
+     * add_waypoints:           Adds waypoints into the nonlinear smoother to optimize passing through each 
+     *                          waypoint. If disabled then waypoint cost weight has no effect.
+     * scale_time:              Scales the segment times evenly to ensure that the trajectory is feasible 
+     *                          given the provided v_max and a_max. Does not change the shape of the trajectory,
+     *                          and only increases segment times
+     */
     mav_planning::locoParams loco_params;
     loco_params.resample_trajectory_ = loco_resample_trajectory;
+    loco_params.resample_visibility_ = loco_resample_visibility;
     loco_params.num_segments_ = loco_num_segments;
     loco_params.add_waypoints_ = loco_add_waypoints;
     loco_params.scale_time_ = loco_scale_time;
-    loco_params.split_at_collisions_ = loco_split_at_collisions;
 
-    loco_smoother_.setParameters(loco_params);
-    // loco_smoother_.setMapDistanceCallback(std::bind(&RRTConnect::getMapDistance, this, std::placeholders::_1));
+    /**
+     * Used across both solvers
+     * 
+     * min_col_check_resolution:    Minimum distance between collision checks for BOTH solvers
+     * optimize_time:               Runs an additional optimization step (using nlopt) to optimize the segment 
+     *                              times in order to better meet the dynamic constraints
+     * split_at_collisions:         Adds additional points to the trajectory if any portion of the initial linear 
+     *                              solvers trajectory is in collision
+     */
+    mav_planning::poly_params poly_params;
+    poly_params.min_col_check_resolution = voxel_size;
+    poly_params.optimize_time = loco_optimize_time;
+    poly_params.split_at_collisions = loco_split_at_collisions;
+
+    /**
+     * These are used in the initial linear solver but also used to calculate time of segments for input to the nonlinear:
+     * 
+     * v_max:                       Max velocity of robot
+     * a_max:                       Max acceleration of robot
+     * yaw_rate_max:                Max yaw rate of robot
+     * robot_radius:                Robot radius
+     * sampling_dt:                 Time step delta at which to sample points from the trajectory to check for collisions
+     *                              this is used in the linear solver and generally only when split at collisions is true
+     */ 
+    mav_planning::PhysicalConstraints physical_constraints;
+    physical_constraints.v_max = loco_v_max;
+    physical_constraints.a_max = loco_a_max;
+    physical_constraints.yaw_rate_max = loco_yaw_rate_max;
+    physical_constraints.robot_radius = robot_radius;
+    physical_constraints.sampling_dt = loco_sampling_dt;
+
+    // Set parameters and callbacks
+    loco_smoother_.setParameters(loco_params, poly_params, physical_constraints, loco_verbose);
     loco_smoother_.setInCollisionCallback(std::bind(&RRTConnect::detectCollision, this, std::placeholders::_1));
     loco_smoother_.setDistanceAndGradientFunction(std::bind(&RRTConnect::getMapDistanceAndGradient, this, std::placeholders::_1, std::placeholders::_2));
 
-    loco_smoother_.loco_config.polynomial_degree = loco_poly_degree;
-    loco_smoother_.loco_config.derivative_to_optimize = loco_derivative_to_optimize;
-    loco_smoother_.loco_config.robot_radius = (robot_radius * 1.5);
+    /**
+     * These are only used in the nonlinear solver
+     * 
+     * epsilon:                      Tuning value for how far outside the robot radius we care about collisions. See eq 9 
+     *                               in https://arxiv.org/pdf/1812.03892.pdf
+     * robot_radius:                 Robot radius (doesnt actually need to be set since its set to the constraints above)
+     * w_d:                          Weighting for smoothness of derivative we are optimizing for.
+     * w_c:                          Weighting for collisions
+     * w_w:                          Weighting for waypoints (has no effect if add_waypoints_ is false)
+     * min_collision_sampling_dt:    Time step delta at which to evaluate cost/gradient for collisions
+     * map_resolution:               Resolution of map
+     * verbose:                      Whether to print debug statements or not
+     */
+    loco_smoother_.loco_config.epsilon = 0.5;
+    loco_smoother_.loco_config.robot_radius = robot_radius;
     loco_smoother_.loco_config.w_d = loco_smoothness_cost_weight;
     loco_smoother_.loco_config.w_c = loco_collision_cost_weight;
     loco_smoother_.loco_config.w_w = loco_waypoint_cost_weight;
+    loco_smoother_.loco_config.min_collision_sampling_dt = loco_min_collision_sampling_dist;
+    loco_smoother_.loco_config.map_resolution = voxel_size;
+    loco_smoother_.loco_config.verbose = loco_verbose;
 }
 
-bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end, bool isConnected = false)
+bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end, bool is_extend = false)
 {
-    //timer.start("Edge Collision Check");
+    timer.start("Edge Collision Check");
 
     double dist;
 
-    if (isConnected)
+    if (is_extend)
         dist = rrt_min_distance;
     else
         dist = distance(start, end);
@@ -96,7 +158,7 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
 
     if (detectCollision(end))
     {
-        //timer.stop("Edge Collision Check");
+        timer.stop("Edge Collision Check");
         return true;
     }
 
@@ -104,50 +166,17 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
     Eigen::Vector3d dir_vec = ((end - start) / dist);
     Eigen::Vector3d pos = start + dir_vec * robot_radius;
 
-    // ------------------ DEBUG -----------------
-    // int t = round(dist / 0.1);
-    // Eigen::Vector3d test_pos = start + dir_vec * 0.1;
-
-    // voxblox::Layer<voxblox::EsdfVoxel>* layer = esdf_map_->getEsdfLayerPtr();
-
-    // fprintf(stderr, "Running full line test w/ %d steps at distance = %f\n", t, dist);
-    // for (int i = 0; i < t; i++)
-    // {
-    //     voxblox::BlockIndex bi = layer->computeBlockIndexFromCoordinates(test_pos.cast<float>());
-    //     voxblox::Block<voxblox::EsdfVoxel>::ConstPtr block_ptr = layer->getBlockPtrByIndex(bi);
-
-    //     if (!block_ptr) {
-    //         fprintf(stderr, "Unallocated Block Index = %u, %u, %u\n", bi(0, 0), bi(1, 0), bi(2, 0));
-    //         continue;
-    //     }
-    //     voxblox::VoxelIndex voxel = layer->getBlockByIndex(bi).computeVoxelIndexFromCoordinates(test_pos.cast<float>());
-
-    //     fprintf(stderr, "Block Index = %u, %u, %u | Voxel Index = %u, %u, %u\n", bi(0, 0), bi(1, 0), bi(2, 0), voxel(0,0), voxel(1,0), voxel(2, 0));
-    //     fprintf(stderr, "pos = (%f, %f, %f), val = %f\n", test_pos.x(), test_pos.y(), test_pos.z(), getMapDistance(test_pos));
-
-    //     test_pos += dir_vec * 0.1;
-    // }
-    // fprintf(stderr, "Starting original w/ %d steps\n", num_of_steps);
-    // ------------------ DEBUG END -----------------
-
     for (int i = 0; i < num_of_steps; i++)
     {
-        // bool coll = detectCollision(pos);
-        // voxblox::BlockIndex bi = layer->computeBlockIndexFromCoordinates(pos.cast<float>());
-        // voxblox::VoxelIndex voxel = layer->getBlockByIndex(bi).computeVoxelIndexFromCoordinates(pos.cast<float>());
-
-        // fprintf(stderr, "Block Index = %u, %u, %u | Voxel Index = %u, %u, %u\n", bi(0, 0), bi(1, 0), bi(2, 0), voxel(0,0), voxel(1,0), voxel(2, 0));
-        // fprintf(stderr, "pos = (%f, %f, %f), col? = %d\n", pos.x(), pos.y(), pos.z(), coll);
         if (detectCollision(pos))
         {
-            //timer.stop("Edge Collision Check");
+            timer.stop("Edge Collision Check");
             return true;
         }
 
         pos += dir_vec * robot_radius;
     }
-
-    //timer.stop("Edge Collision Check");
+    timer.stop("Edge Collision Check");
     return false;
 }
 
@@ -163,11 +192,9 @@ double RRTConnect::getMapDistance(const Eigen::Vector3d &position)
     {
         // if we cannot identify a voxel close enough to this location WITHOUT interpolation, it is unknown so reject it
         if (rrt_treat_unknown_as_occupied)
-        {
-            return 0.0;
-        }
+            dist = 0.0;
         else
-            return esdf_default_distance;
+            dist = esdf_default_distance;
     }
 
     return dist;
@@ -190,7 +217,7 @@ Node *RRTConnect::createNewNode(const Eigen::Vector3d &position, Node *parent)
     return new_node;
 }
 
-Node *RRTConnect::getRandomNode()
+Node *RRTConnect::createRandomNode()
 {
     double x = ((upper_bound_.x() - lower_bound_.x()) * (double)rand() / (double)RAND_MAX) + lower_bound_.x();
     double y = ((upper_bound_.y() - lower_bound_.y()) * (double)rand() / (double)RAND_MAX) + lower_bound_.y();
@@ -211,7 +238,7 @@ std::pair<Node *, double> RRTConnect::findNearest(const Eigen::Vector3d &point)
     if (!nodes_[actual_index].empty())
     {
 
-        for (int i = 0; i < nodes_[actual_index].size(); i++)
+        for (size_t i = 0; i < nodes_[actual_index].size(); i++)
         {
             // TODO: Is this needed?
             if (nodes_[actual_index][i] == nullptr)
@@ -232,7 +259,7 @@ std::pair<Node *, double> RRTConnect::findNearest(const Eigen::Vector3d &point)
         actual_index = binSelect(actual_index);
         if (!nodes_[actual_index].empty())
         {
-            for (int i = 0; i < nodes_[actual_index].size(); i++)
+            for (size_t i = 0; i < nodes_[actual_index].size(); i++)
             {
                 double dist = distance(point, nodes_[actual_index][i]->position);
                 if (dist < min_dist)
@@ -308,18 +335,18 @@ int RRTConnect::flatIndexfromPoint(const Eigen::Vector3d &point)
     return (bi.x() - ind_lower_[0]) + (bi.y() - ind_lower_[1] * d_x_) + ((bi.z() - ind_lower_[2]) * d_y_ * d_x_);
 }
 
-void RRTConnect::add(Node *qNearest, Node *qNew)
+void RRTConnect::add(Node *q_nearest, Node *q_new)
 {
-    qNew->parent = qNearest;
-    qNearest->children.push_back(qNew);
+    q_new->parent = q_nearest;
+    q_nearest->children.push_back(q_new);
 
-    int actual_index = flatIndexfromPoint(qNew->position);
-    nodes_[actual_index].push_back(qNew);
+    int actual_index = flatIndexfromPoint(q_new->position);
+    nodes_[actual_index].push_back(q_new);
 }
 
 void RRTConnect::deleteNodes(Node *root)
 {
-    for (int i = 0; i < root->children.size(); i++)
+    for (size_t i = 0; i < root->children.size(); i++)
     {
         deleteNodes(root->children[i]);
     }
@@ -327,8 +354,10 @@ void RRTConnect::deleteNodes(Node *root)
     root = nullptr;
 }
 
-void RRTConnect::cleanupPruning() {
-    for (const auto& node : pruning_nodes_) {
+void RRTConnect::cleanupPruning()
+{
+    for (const Node* node : pruning_nodes_)
+    {
         delete node;
     }
 
@@ -344,7 +373,7 @@ void RRTConnect::nodesToEigen(mav_msgs::EigenTrajectoryPointVector &eigen_path)
         return;
     }
 
-    for (int i = 0; i < rrt_path_.size(); i++)
+    for (size_t i = 0; i < rrt_path_.size(); i++)
     {
         mav_msgs::EigenTrajectoryPoint curr_pt;
         curr_pt.position_W = rrt_path_[i]->position;
@@ -352,16 +381,16 @@ void RRTConnect::nodesToEigen(mav_msgs::EigenTrajectoryPointVector &eigen_path)
     }
 }
 
-bool RRTConnect::locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoints, mav_msgs::EigenTrajectoryPointVector &path, mav_trajectory_generation::Trajectory &last_trajectory)
+bool RRTConnect::locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoints, mav_msgs::EigenTrajectoryPointVector &smoothed_path, mav_trajectory_generation::Trajectory &final_trajectory)
 {
-    bool got = loco_smoother_.getTrajectoryBetweenWaypoints(waypoints, &last_trajectory);
+    bool got = loco_smoother_.getTrajectoryBetweenWaypoints(waypoints, &final_trajectory);
 
     bool success = false;
     if (got)
     {
         mav_msgs::EigenTrajectoryPoint::Vector states;
         double sampling_interval = 0.05;
-        success = mav_trajectory_generation::sampleWholeTrajectory(last_trajectory, sampling_interval, &path);
+        success = mav_trajectory_generation::sampleWholeTrajectory(final_trajectory, sampling_interval, &smoothed_path);
     }
 
     return got && success;
@@ -372,11 +401,11 @@ bool RRTConnect::runSmoother(mav_trajectory_generation::Trajectory &trajectory)
     printf("Running Smoother\n");
     uint64_t start_time = rc_nanos_monotonic_time();
 
-    mav_msgs::EigenTrajectoryPointVector base_path;
+    mav_msgs::EigenTrajectoryPointVector waypoints;
 
-    nodesToEigen(base_path);
+    nodesToEigen(waypoints);
 
-    bool loco_success = locoSmooth(base_path, smoothed_path_, trajectory);
+    bool loco_success = locoSmooth(waypoints, smoothed_path_, trajectory);
 
     if (loco_success)
     {
@@ -394,6 +423,7 @@ void RRTConnect::pruneRRTPath()
 {
     int prune_count = 0;
 
+    // Level 1 pruning
     int index_a;
     int index_b;
 
@@ -407,7 +437,7 @@ void RRTConnect::pruneRRTPath()
     std::default_random_engine generator;
     std::uniform_real_distribution<float> distribution(0.2, 0.8);
 
-    for (int i = 0; i < RRT_PRUNE_ITERATIONS; i++)
+    for (int i = 0; i < rrt_prune_iterations; i++)
     {
         // Pick two nodes at random (ensure index b is always greater than index a)
         index_a = rand() % (rrt_path_.size() - 2);
@@ -447,6 +477,27 @@ void RRTConnect::pruneRRTPath()
         }
     }
 
+    // Level 2 pruning
+    Node *start;
+    Node *end;
+
+    for (size_t i = 0; i < rrt_path_.size() - 2; i++)
+    {
+        start = rrt_path_[i];
+
+        for (size_t j = rrt_path_.size() - 1; j > i; j--)
+        {
+            end = rrt_path_[j];
+
+            if (!detectCollisionEdge(start->position, end->position))
+            {
+                rrt_path_.erase(rrt_path_.begin() + i + 1, rrt_path_.begin() + j);
+                prune_count++;
+                break;
+            }
+        }
+    }
+
     printf("Pruned %d time\n", prune_count);
 }
 
@@ -454,7 +505,7 @@ void RRTConnect::visualizePaths()
 {
     // Get RRT Tree points
     std::vector<point_xyz> rrt_pc;
-    for (const auto &rrt_node : rrt_path_)
+    for (const Node* rrt_node : rrt_path_)
     {
         point_xyz pt;
         pt.x = rrt_node->position.x();
@@ -487,6 +538,9 @@ void RRTConnect::visualizePaths()
 
     if (waypoints_meta.n_points != 0)
         pipe_server_write_point_cloud(vis_channel_, waypoints_meta, rrt_pc.data());
+
+    // Delay before sending another path
+    usleep(100000);
 
     waypoints_meta.n_points = smooth_path_pc.size();
     waypoints_meta.timestamp_ns = 1;
@@ -537,7 +591,8 @@ void RRTConnect::visualizeMap()
 
 bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector3d &endPos, mav_trajectory_generation::Trajectory &trajectory)
 {
-    //timer.start("RRT Planner");
+    timer.start("RRT Planner");
+    printf("Start = (%f, %f, %f), End = (%f, %f, %f)\n", startPos.x(), startPos.y(), startPos.z(), endPos.x(), endPos.y(), endPos.z());
 
     // Setup start and end nodes
     Node *qStart = createNewNode(startPos, nullptr);
@@ -572,9 +627,9 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
 
     uint64_t start_time = rc_nanos_monotonic_time();
     int attempts = 0;
-    Node *qRand = nullptr;
-    Node *qConnect = nullptr;
-    Node *qNear = nullptr;
+    Node *q_rand = nullptr;
+    Node *q_connect = nullptr;
+    Node *q_near = nullptr;
     double dist = 0;
     bool collision_found;
 
@@ -582,61 +637,62 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     {
         // Get random node or use goal
         if (attempts % 10 == 0)
-            qRand = qGoal;
+            q_rand = qGoal;
         else
-            qRand = getRandomNode();
+            q_rand = createRandomNode();
 
-        if (qRand)
+        if (q_rand)
         {
             collision_found = false;
 
             // Find nearest node in tree
-            std::tie(qNear, dist) = findNearest(qRand->position);
+            std::tie(q_near, dist) = findNearest(q_rand->position);
 
-            Eigen::Vector3d dir_vec = ((qRand->position - qNear->position) / dist);
+            Eigen::Vector3d dir_vec = ((q_rand->position - q_near->position) / dist);
 
-            // Continually step towards qRand by rrt_min_distance and add a node if its collision free
-            while ((qRand->position - qNear->position).squaredNorm() > pow(rrt_min_distance, 2))
+            // Continually step towards q_rand by rrt_min_distance and add a node if its collision free
+            // Optimization: Use squared distances to avoid having to do the square root which is more expensive
+            while ((q_rand->position - q_near->position).squaredNorm() > pow(rrt_min_distance, 2))
             {
-                qConnect = createNewNode(qNear->position + rrt_min_distance * dir_vec, nullptr);
+                q_connect = createNewNode(q_near->position + rrt_min_distance * dir_vec, nullptr);
 
-                if (!detectCollisionEdge(qNear->position, qConnect->position, true))
+                if (!detectCollisionEdge(q_near->position, q_connect->position, true))
                 {
-                    add(qNear, qConnect);
-                    qNear = qConnect;
+                    add(q_near, q_connect);
+                    q_near = q_connect;
                 }
                 else
                 {
                     // The current node is in collision so it is not added to the tree and needs to be deleted
-                    delete qConnect;
-                    qConnect = nullptr;
+                    delete q_connect;
+                    q_connect = nullptr;
                     collision_found = true;
                     break;
                 }
             }
 
-            // Add qRand only if the while loop succesfully finished and its collision free
-            if (!collision_found && !detectCollisionEdge(qNear->position, qRand->position))
+            // Add q_rand only if the while loop succesfully finished and its collision free
+            if (!collision_found && !detectCollisionEdge(q_near->position, q_rand->position))
             {
-                add(qNear, qRand);
+                add(q_near, q_rand);
 
                 // If we ran goal biasing then the end point would be the goal, so exit
-                if (qRand == qGoal)
+                if (q_rand == qGoal)
                     break;
             }
-            else if (qRand != qGoal)
+            else if (q_rand != qGoal)
             {
-                // Delete qRand if we couldnt add to graph and it wasnt the goal node
-                delete qRand;
-                qRand = nullptr;
+                // Delete q_rand if we couldnt add to graph and it wasnt the goal node
+                delete q_rand;
+                q_rand = nullptr;
             }
 
             // Check if we can reach goal
-            std::tie(qNear, dist) = findNearest(qGoal->position);
+            std::tie(q_near, dist) = findNearest(qGoal->position);
 
-            if (dist <= GOAL_THRESHOLD)
+            if (dist <= rrt_goal_threshold)
             {
-                add(qNear, qGoal);
+                add(q_near, qGoal);
                 break;
             }
         }
@@ -669,21 +725,23 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     // Reverse path since we traveresed tree from leaf to root but we want root to leaf
     std::reverse(rrt_path_.begin(), rrt_path_.end());
 
-    //timer.stop("RRT Planner");
-
-    //timer.start("Pruning");
+    timer.start("Pruning");
     pruneRRTPath();
-    //timer.stop("Pruning");
+    timer.stop("Pruning");
+    
+    timer.stop("RRT Planner");
 
     // Run smoother
-    //timer.start("Smoother");
+    timer.start("Smoother");
     bool smoother_success = runSmoother(trajectory);
-    //timer.stop("Smoother");
+    timer.stop("Smoother");
 
-    //timer.printAllTimers();
+    timer.printAllTimers();
 
     visualizePaths();
-    // visualizeMap();
+
+    if (rrt_send_map) 
+        visualizeMap();
 
     return smoother_success;
 }
