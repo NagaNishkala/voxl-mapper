@@ -39,6 +39,9 @@ static constexpr int ANGULAR_ACCELERATION = 2;
 static constexpr int INVALID = -1;
 }
 
+constexpr int kPolynomialDegree = 8;
+constexpr int kDerivativeToOptimize = derivative_order::JERK;
+
 std::string positionDerivativeToString(int derivative);
 int positionDerivativeToInt(const std::string& string);
 

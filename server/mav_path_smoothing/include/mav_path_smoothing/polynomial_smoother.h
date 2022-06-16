@@ -8,9 +8,9 @@
 namespace mav_planning {
 
 typedef struct poly_params{
-    bool optimize_time = true;
-    bool split_at_collisions = true;
-    double min_col_check_resolution = 0.1;
+    bool optimize_time;
+    bool split_at_collisions;
+    double min_col_check_resolution;
 } poly_params;
 
 class PolynomialSmoother : public PathSmootherBase {
@@ -19,8 +19,6 @@ class PolynomialSmoother : public PathSmootherBase {
     virtual ~PolynomialSmoother() {}
 
     virtual void setParameters(poly_params pp, PhysicalConstraints constraints, bool verbose);
-
-    virtual void setPoly(int n, int d);
 
     virtual bool getTrajectoryBetweenWaypoints(
         const mav_msgs::EigenTrajectoryPoint::Vector& waypoints,
@@ -95,8 +93,6 @@ class PolynomialSmoother : public PathSmootherBase {
     // Functions for collision checking.
     MapDistanceFunctionType map_distance_func_;
     InCollisionFunctionType in_collision_func_;
-    int n_ = 8;
-    int d_ = 3;
 };
 
 }  // namespace mav_planning

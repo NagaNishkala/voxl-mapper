@@ -9,7 +9,7 @@ namespace mav_planning {
 
 PolynomialSmoother::PolynomialSmoother()
     : PathSmootherBase(),
-      optimize_time_(false), // turi
+      optimize_time_(true),
       split_at_collisions_(true),
       min_col_check_resolution_(0.1) {}
 
@@ -20,12 +20,6 @@ void PolynomialSmoother::setParameters(poly_params pp, PhysicalConstraints const
     split_at_collisions_ = pp.split_at_collisions;
     min_col_check_resolution_ = pp.min_col_check_resolution;
 }
-
-void PolynomialSmoother::setPoly(int n, int d){
-    n_ = n;
-    d_ = d;
-}
-
 
 bool PolynomialSmoother::getTrajectoryBetweenWaypoints(
     const mav_msgs::EigenTrajectoryPoint::Vector& waypoints,
@@ -38,14 +32,16 @@ bool PolynomialSmoother::getTrajectoryBetweenWaypoints(
   mav_trajectory_generation::timing::Timer linear_timer(
       "smoothing/poly_linear");
 
-  constexpr int N = 8;
+  // Polynomials should always be of degree kPolynomialDegree 
+  // Polynomials are need for three dimensions (x, y, z)
+  constexpr int N = mav_trajectory_generation::kPolynomialDegree;
   constexpr int D = 3;
-  mav_trajectory_generation::PolynomialOptimization<N> poly_opt(D, d_, n_);
+
+  mav_trajectory_generation::PolynomialOptimization<N> poly_opt(D);
 
   int num_vertices = waypoints.size();
 
-  int derivative_to_optimize = d_;
-    //   mav_trajectory_generation::derivative_order::JERK;
+  int derivative_to_optimize = mav_trajectory_generation::kDerivativeToOptimize;
 
   mav_trajectory_generation::Vertex::Vector vertices(
       num_vertices, mav_trajectory_generation::Vertex(D));
@@ -135,7 +131,7 @@ bool PolynomialSmoother::getTrajectoryBetweenWaypoints(
         break;
       }
     }
-    // printf("[SPLIT SMOOTHING] Added %d additional vertices.\n", num_added);
+    printf("[SPLIT SMOOTHING] Added %d additional vertices.\n", num_added);
 
     // If we had to do this, let's scale the times back to make sure we're
     // still within constraints.

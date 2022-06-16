@@ -8,12 +8,11 @@
 namespace mav_planning {
 
 typedef struct locoParams{
-  bool resample_trajectory_ = false;
-  bool resample_visibility_ = false;
-  int num_segments_ = 12;
-  bool add_waypoints_ = false;
-  bool scale_time_ = true;
-  bool split_at_collisions_ = true;
+  bool resample_trajectory_;
+  bool resample_visibility_;
+  int num_segments_;
+  bool add_waypoints_;
+  bool scale_time_;
 } locoParams;
 
 class LocoSmoother : public PolynomialSmoother {
@@ -26,6 +25,7 @@ class LocoSmoother : public PolynomialSmoother {
   virtual ~LocoSmoother() {}
 
   virtual void setParameters(locoParams loco_params);
+  virtual void setParameters(locoParams loco_params, poly_params pp, PhysicalConstraints constraints, bool verbose);
 
   virtual bool getTrajectoryBetweenWaypoints(
       const mav_msgs::EigenTrajectoryPoint::Vector& waypoints,

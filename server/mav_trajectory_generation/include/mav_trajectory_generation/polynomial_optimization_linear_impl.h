@@ -51,20 +51,6 @@ PolynomialOptimization<_N>::PolynomialOptimization(size_t dimension)
 }
 
 template <int _N>
-PolynomialOptimization<_N>::PolynomialOptimization(size_t dimension, int derivative_to_optimize, size_t n_segments)
-    : dimension_(dimension),
-      derivative_to_optimize_(derivative_to_optimize),
-      n_vertices_(0),
-      n_segments_(n_segments),
-      n_all_constraints_(0),
-      n_fixed_constraints_(0),
-      n_free_constraints_(0) {
-    fixed_constraints_compact_.resize(dimension_);
-    free_constraints_compact_.resize(dimension_);
-}
-
-
-template <int _N>
 bool PolynomialOptimization<_N>::setupFromVertices(
     const Vertex::Vector& vertices, const std::vector<double>& times,
     int derivative_to_optimize) {

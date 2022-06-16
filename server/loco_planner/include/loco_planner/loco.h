@@ -13,15 +13,13 @@
 namespace loco_planner {
 
  typedef struct Config {
-    int polynomial_degree = 10;
-    int derivative_to_optimize = mav_trajectory_generation::derivative_order::JERK;
     double epsilon = 0.5;
     double robot_radius = 0.5;
     bool soft_goal_constraint = false;
-    double w_d = 0.05;   // Smoothness cost weight.
-    double w_c = 8.0;  // Collision cost weight.
+    double w_d = 0.1;   // Smoothness cost weight.
+    double w_c = 10.0;  // Collision cost weight.
     double w_g = 2.5;   // Soft goal cost weight (if using soft goals).
-    double w_w = 0.5;   // Waypoint cost weight (if waypoints set).
+    double w_w = 1.0;   // Waypoint cost weight (if waypoints set).
     double min_collision_sampling_dt = 0.1; //0.1
     double map_resolution = 0.1;  // Size of voxels in the map.
     bool verbose = false;
