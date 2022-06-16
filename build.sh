@@ -36,7 +36,7 @@ case "$1" in
 	apq8096)
 		mkdir -p build64
 		cd build64
-		cmake -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_APQ8096_64} -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS} -std=c++11 -march=armv8-a -L  /usr/aarch64-linux-gnu-2.23/lib -I  /usr/aarch64-linux-gnu-2.23/include" ${EXTRA_OPTS} ../
+		cmake -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_APQ8096_64} -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" ${EXTRA_OPTS} ../
 		make -j$(nproc)
 		cd ../
 		;;
