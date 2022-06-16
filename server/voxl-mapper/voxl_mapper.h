@@ -3,7 +3,13 @@
 
 #include <voxblox/io/mesh_ply.h>
 #include <voxblox/mesh/mesh_integrator.h>
-#include <mav_local_planner/mav_local_planner.h>
+#include <voxblox/utils/planning_utils.h>
+#include <mav_path_smoothing/loco_smoother.h>
+
+#include <voxblox/core/tsdf_map.h>
+#include <voxblox/core/esdf_map.h>
+#include <voxblox/core/layer.h>
+
 
 #include "voxl_cutils.h"
 #include "mesh_vis.h"
