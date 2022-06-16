@@ -39,6 +39,17 @@ public:
         cur.running = false;
     }
 
+    void reset(std::string timer_name) {
+        if (!checkExists(timer_name)) {
+            fprintf(stderr, "TIMER ERROR: No such timer exists to stop\n");
+            return;
+        }
+
+        TimeStatistics& cur = named_timers_[timer_name];
+
+        cur = TimeStatistics();
+    }
+
     void printTimerStats(std::string timer_name, bool print_header = true) {
         if (!checkExists(timer_name)) {
             fprintf(stderr, "TIMER ERROR: No such timer exists to print stats for\n");
@@ -66,7 +77,7 @@ public:
         printf("\n------------------------------------------\n");
     }
 
-    void printAllTimers() {
+    void printAllTimers(bool reset_timers=true) {
 
         // We want to print the header only on the first timer (makes output neater)
         bool print_header = true;
@@ -74,6 +85,9 @@ public:
                 printTimerStats(it.first, print_header);
 
                 print_header = false;
+
+                if (reset_timers)
+                    reset(it.first);
             }
     }
 
