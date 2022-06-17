@@ -152,7 +152,7 @@ private:
      * 
      * @param eigen_path [output] path to be fed to smoother
      */
-    void nodesToEigen(mav_msgs::EigenTrajectoryPointVector &eigen_path);
+    void nodesToEigen(const std::vector<Node*> &rrt_path, mav_msgs::EigenTrajectoryPointVector &eigen_path);
 
     /**
      * @brief Runs the loco smoother on the path returned from RRT
@@ -172,7 +172,7 @@ private:
      * @return true smoother ran succesfully
      * @return false smoother failed
      */
-    bool runSmoother(mav_trajectory_generation::Trajectory &trajectory);
+    bool runSmoother(const std::vector<Node*> &rrt_path, mav_trajectory_generation::Trajectory &trajectory);
 
     /**
      * @brief Prunes the found RRT path in two levels.
@@ -192,7 +192,7 @@ private:
      * the path created by level 1's randomness. Level 2 also helps to further
      * shorten the path.
      */
-    void pruneRRTPath();
+    void pruneRRTPath(std::vector<Node*> &rrt_path);
 
     /**
      * @brief Deletes intermediate nodes created by Level 1 pruning
@@ -204,7 +204,7 @@ private:
      * @brief Sends both RRT and smoothed trajectory path points to voxl-portal
      * 
      */
-    void visualizePaths();
+    void visualizePaths(const std::vector<Node*> &rrt_path);
 
     /**
      * @brief Sends ESDF data to voxl-portal to allow for visualizing of the map
@@ -225,7 +225,6 @@ private:
     double ind_lower_[3];
 
     std::vector<std::vector<Node *>> nodes_;
-    std::vector<Node *> rrt_path_;
     std::vector<Node *> pruning_nodes_;
     mav_msgs::EigenTrajectoryPointVector smoothed_path_;
     Node *root_;
