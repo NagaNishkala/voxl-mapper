@@ -1,6 +1,8 @@
 #ifndef VOXBLOX_ROS_CONVERSIONS_H_
 #define VOXBLOX_ROS_CONVERSIONS_H_
 
+#include <voxblox/msgs/voxblox_msgs.h>
+
 namespace voxblox
 {
 

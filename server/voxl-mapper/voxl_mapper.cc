@@ -1147,17 +1147,31 @@ bool TsdfServer::loadMap(std::string tsdf_path, std::string esdf_path)
 {
     planning = true;
     constexpr bool mult_layer_support = true;
-    bool tsdf_loaded = LoadBlocksFromFile(
+
+    if (tsdf_map_->getTsdfLayerPtr() == nullptr)
+    {
+        fprintf(stderr, "Unable to load layer: TSDF layer pointer is null\n");
+        return false;
+    }
+
+    if (esdf_map_->getEsdfLayerPtr() == nullptr)
+    {
+        fprintf(stderr, "Unable to load layer: ESDF layer pointer is null\n");
+        return false;
+    }
+
+
+    bool tsdf_loaded = tsdf_map_->getTsdfLayerPtr()->loadBlocksFromFile(
         tsdf_path, Layer<TsdfVoxel>::BlockMergingStrategy::kReplace,
-        mult_layer_support, tsdf_map_->getTsdfLayerPtr());
+        mult_layer_support);
     if (tsdf_loaded){
         printf("Successfully loaded TSDF layer.\n");
     }
     else return false;
 
-    bool esdf_loaded = LoadBlocksFromFile(
+    bool esdf_loaded = esdf_map_->getEsdfLayerPtr()->loadBlocksFromFile(
         esdf_path, Layer<EsdfVoxel>::BlockMergingStrategy::kReplace,
-        mult_layer_support, esdf_map_->getEsdfLayerPtr());
+        mult_layer_support);
     if (esdf_loaded){
         printf("Successfully loaded ESDF layer.\n");
     }
