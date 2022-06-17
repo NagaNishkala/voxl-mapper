@@ -5,6 +5,7 @@
 #include <voxblox/mesh/mesh_integrator.h>
 #include <voxblox/utils/planning_utils.h>
 #include <mav_path_smoothing/loco_smoother.h>
+#include <global_planners/rrt_connect.h>
 
 #include <voxblox/core/tsdf_map.h>
 #include <voxblox/core/esdf_map.h>
@@ -26,10 +27,12 @@ public:
 
     TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::Config &integrator_config,
                 const MeshIntegratorConfig &mesh_config, bool debug, bool timing);
-    virtual ~TsdfServer() {}
+    virtual ~TsdfServer() {
+        planner_->tearDown();
+    }
 
-    // rrt planner
-    bool maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, std::shared_ptr<EsdfMap> esdf_map_ptr, mav_trajectory_generation::Trajectory* path_to_follow);
+    // Planner
+    bool runPlanner(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, mav_trajectory_generation::Trajectory* path_to_follow);
     bool followPath();
 
     /// mpa callbacks
@@ -95,6 +98,7 @@ public:
 protected:
     /// boolean showing if we are planning, used to stop other background processes
     bool planning = false;
+    GlobalPlanner *planner_;
 
     /// base costmap built, can do incremental updates from now on (when true)
     bool costmap_updates_only;

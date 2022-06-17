@@ -33,7 +33,7 @@ public:
      */
     virtual bool createPlan(const Eigen::Vector3d &startPos,
                             const Eigen::Vector3d &endPos,
-                            mav_trajectory_generation::Trajectory &trajectory) { return false; };
+                            mav_trajectory_generation::Trajectory &trajectory) = 0;
 
     virtual ~GlobalPlanner() {};
 };

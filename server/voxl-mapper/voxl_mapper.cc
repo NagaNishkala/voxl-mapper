@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <mav_local_planner/conversions.h>
 #include <mav_trajectory_generation/trajectory_sampling.h>
-#include <global_planners/rrt_connect.h>
+
 
 #define PROCESS_NAME "voxl-mapper"
 
@@ -70,6 +70,10 @@ namespace voxblox
 
     TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::Config &integrator_config,
                            const MeshIntegratorConfig &mesh_config, bool debug, bool timing)
+                           : en_debug(debug), 
+                             en_timing(timing), 
+                             planner_(nullptr),
+                             costmap_updates_only(false)
     {
 
         tsdf_map_.reset(new TsdfMap(config));
@@ -82,10 +86,6 @@ namespace voxblox
         str_esdf_save_path.assign(esdf_save_path, BUF_LEN);
         str_tsdf_save_path.assign(tsdf_save_path, BUF_LEN);
         str_mesh_save_path.assign(mesh_save_path, BUF_LEN);
-
-        en_debug = debug;
-        en_timing = timing;
-        costmap_updates_only = false;
 
         // tof has a seperate cb over regular depth ptc
         if (tof_enable)
@@ -312,7 +312,7 @@ namespace voxblox
         // pointcloud gradient coloring
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        for (int i = 0; i < ptcloud.size(); i++)
+        for (size_t i = 0; i < ptcloud.size(); i++)
         {
             float height = _pub_ptcloud[i].z();
 
@@ -330,7 +330,7 @@ namespace voxblox
             float a = height * 5;
             int X = (int)(a);
             int Y = (int)(255 * (a - X));
-            int r, g, b;
+            int r = 0, g = 0, b = 0;
             switch (X)
             {
             case 0:
@@ -530,7 +530,7 @@ namespace voxblox
         // pointcloud gradient coloring
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        for (int i = 0; i < ptcloud.size(); i++)
+        for (size_t i = 0; i < ptcloud.size(); i++)
         {
             float height = _pub_ptcloud[i].z();
 
@@ -548,7 +548,7 @@ namespace voxblox
             float a = height * 5;
             int X = (int)(a);
             int Y = (int)(255 * (a - X));
-            int r, g, b;
+            int r = 0, g = 0, b = 0;
             switch (X)
             {
             case 0:
@@ -794,6 +794,9 @@ namespace voxblox
         esdf_map_.reset(new EsdfMap(esdf_map_config));
         esdf_integrator_.reset(new EsdfIntegrator(esdf_int_config, tsdf_map_->getTsdfLayerPtr(), esdf_map_->getEsdfLayerPtr()));
 
+        planner_ = new RRTConnect(esdf_map_, RENDER_CH);
+        planner_->setup();
+
         keep_updating = true;
         visual_updates_thread = std::thread(&TsdfServer::visual_updates_thread_worker, this);
 
@@ -1010,7 +1013,7 @@ namespace voxblox
             fprintf(stderr, "using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
 
             pthread_mutex_unlock(&pose_mutex); // return mutex lock
-            server->maiRRT(start_pose, goal_pose, server->getEsdfMapPtr(), &(server->path_to_follow));
+            server->runPlanner(start_pose, goal_pose, &(server->path_to_follow));
             server->planning = false;
             return;
         }
@@ -1144,7 +1147,7 @@ namespace voxblox
             fprintf(stderr, "using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
 
             pthread_mutex_unlock(&pose_mutex); // return mutex lock
-            server->maiRRT(start_pose, goal_pose, server->getEsdfMapPtr(), &(server->path_to_follow));
+            server->runPlanner(start_pose, goal_pose, &(server->path_to_follow));
 
             server->planning = false;
             return;
@@ -1176,18 +1179,12 @@ namespace voxblox
         return;
     }
 
-    bool TsdfServer::maiRRT(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, std::shared_ptr<EsdfMap> esdf_map_ptr, mav_trajectory_generation::Trajectory *path_to_follow)
+    bool TsdfServer::runPlanner(Eigen::Vector3d start_pose, Eigen::Vector3d goal_pose, mav_trajectory_generation::Trajectory *path_to_follow)
     {
-        GlobalPlanner *planner = new RRTConnect(esdf_map_ptr, RENDER_CH);
-
         if (en_debug)
             fprintf(stderr, "STARTING SOLVE\n");
 
-        bool success = planner->createPlan(start_pose, goal_pose, *path_to_follow);
-
-        esdf_map_ptr.reset();
-
-        delete planner;
+        bool success = planner_->createPlan(start_pose, goal_pose, *path_to_follow);
 
         return success;
     }
@@ -1217,7 +1214,7 @@ namespace voxblox
         // use load and start until collision avoidance merged //
         out.traj_command = TRAJ_CMD_LOAD_AND_START;
 
-        for (int i = 0; i < msg.segments.size(); i++)
+        for (size_t i = 0; i < msg.segments.size(); i++)
         {
             if (msg.segments[i].num_coeffs > TRAJ_MAX_COEFFICIENTS)
             {
@@ -1227,7 +1224,7 @@ namespace voxblox
             out.segments[i].n_coef = msg.segments[i].num_coeffs;
             out.segments[i].duration_s = msg.segments[i].segment_time / 1000000000.0;
             if (en_debug)
-                fprintf(stderr, "duration of segment %d: %6.5f\n", i, out.segments[i].duration_s);
+                fprintf(stderr, "duration of segment %ld: %6.5f\n", i, out.segments[i].duration_s);
 
             for (int j = 0; j < out.segments[i].n_coef; j++)
             {
@@ -1235,7 +1232,7 @@ namespace voxblox
                 out.segments[i].cy[j] = msg.segments[i].y[j];
                 out.segments[i].cz[j] = msg.segments[i].z[j];
                 if (en_debug)
-                    fprintf(stderr, "segment %d-> x: %6.5f, y: %6.5f, z: %6.5f\n", i, out.segments[i].cx[j], out.segments[i].cy[j], out.segments[i].cz[j]);
+                    fprintf(stderr, "segment %ld-> x: %6.5f, y: %6.5f, z: %6.5f\n", i, out.segments[i].cx[j], out.segments[i].cy[j], out.segments[i].cz[j]);
             }
         }
         printf("sending trajectory to plan channel\n");

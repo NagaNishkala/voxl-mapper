@@ -29,7 +29,7 @@ public:
 
     bool createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector3d &endPos, mav_trajectory_generation::Trajectory &trajectory);
 
-    ~RRTConnect();
+    void tearDown();
 
 private:
     /**
@@ -133,11 +133,19 @@ private:
     void add(Node *q_nearest, Node *q_new);
 
     /**
-     * @brief Cleanup all nodes
+     * @brief Cleanup nodes by recursively traversing nodes and deleting
      * 
      * @param root the starting point of the RRT tree
      */
     void deleteNodes(Node *root);
+
+    /**
+     * @brief Cleanup the RRT tree and all associated search structures
+     * 
+     */
+    void cleanupTree();
+
+    bool fixTree(Node* new_root);
 
     /**
      * @brief Convert the rrt path to the appropriate eigen type for the smoother to process

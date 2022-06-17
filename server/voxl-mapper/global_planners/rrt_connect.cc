@@ -20,9 +20,6 @@ RRTConnect::RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map_, int vis_chan
 {
     // Set the random seed
     srand(time(nullptr));
-
-    computeMapBounds();
-
     setupSmoother();
 }
 
@@ -61,19 +58,19 @@ bool RRTConnect::computeMapBounds()
 void RRTConnect::setupSmoother()
 {
     /** These are mainly used in the nonlinear smoothing:
-     * 
-     * resample_trajectory:     If true will take the initial guess from the linear solver and resample the 
-     *                          trajectory to get a new trajectory with num_segments in it that is then 
+     *
+     * resample_trajectory:     If true will take the initial guess from the linear solver and resample the
+     *                          trajectory to get a new trajectory with num_segments in it that is then
      *                          passed to the nonlinear solver.
-     * resample_visibility:     If true will resample before running the linear solver. Uses the visiblity 
-     *                          graph and a time estimation of the entire path to resample points. the 
-     *                          visibility graph is essentially the graph made up of the waypoints passed to 
+     * resample_visibility:     If true will resample before running the linear solver. Uses the visiblity
+     *                          graph and a time estimation of the entire path to resample points. the
+     *                          visibility graph is essentially the graph made up of the waypoints passed to
      *                          the smoother.
-     * num_segments:            The number of segments that the resampled trajectory will have (only applies 
+     * num_segments:            The number of segments that the resampled trajectory will have (only applies
      *                          if resample_trajectory is true.
-     * add_waypoints:           Adds waypoints into the nonlinear smoother to optimize passing through each 
+     * add_waypoints:           Adds waypoints into the nonlinear smoother to optimize passing through each
      *                          waypoint. If disabled then waypoint cost weight has no effect.
-     * scale_time:              Scales the segment times evenly to ensure that the trajectory is feasible 
+     * scale_time:              Scales the segment times evenly to ensure that the trajectory is feasible
      *                          given the provided v_max and a_max. Does not change the shape of the trajectory,
      *                          and only increases segment times
      */
@@ -86,11 +83,11 @@ void RRTConnect::setupSmoother()
 
     /**
      * Used across both solvers
-     * 
+     *
      * min_col_check_resolution:    Minimum distance between collision checks for BOTH solvers
-     * optimize_time:               Runs an additional optimization step (using nlopt) to optimize the segment 
+     * optimize_time:               Runs an additional optimization step (using nlopt) to optimize the segment
      *                              times in order to better meet the dynamic constraints
-     * split_at_collisions:         Adds additional points to the trajectory if any portion of the initial linear 
+     * split_at_collisions:         Adds additional points to the trajectory if any portion of the initial linear
      *                              solvers trajectory is in collision
      */
     mav_planning::poly_params poly_params;
@@ -100,14 +97,14 @@ void RRTConnect::setupSmoother()
 
     /**
      * These are used in the initial linear solver but also used to calculate time of segments for input to the nonlinear:
-     * 
+     *
      * v_max:                       Max velocity of robot
      * a_max:                       Max acceleration of robot
      * yaw_rate_max:                Max yaw rate of robot
      * robot_radius:                Robot radius
      * sampling_dt:                 Time step delta at which to sample points from the trajectory to check for collisions
      *                              this is used in the linear solver and generally only when split at collisions is true
-     */ 
+     */
     mav_planning::PhysicalConstraints physical_constraints;
     physical_constraints.v_max = loco_v_max;
     physical_constraints.a_max = loco_a_max;
@@ -122,8 +119,8 @@ void RRTConnect::setupSmoother()
 
     /**
      * These are only used in the nonlinear solver
-     * 
-     * epsilon:                      Tuning value for how far outside the robot radius we care about collisions. See eq 9 
+     *
+     * epsilon:                      Tuning value for how far outside the robot radius we care about collisions. See eq 9
      *                               in https://arxiv.org/pdf/1812.03892.pdf
      * robot_radius:                 Robot radius (doesnt actually need to be set since its set to the constraints above)
      * w_d:                          Weighting for smoothness of derivative we are optimizing for.
@@ -182,7 +179,7 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
 
 bool RRTConnect::detectCollision(const Eigen::Vector3d &pos)
 {
-    return getMapDistance(pos) <= robot_radius * 1.5;
+    return getMapDistance(pos) <= robot_radius;
 }
 
 double RRTConnect::getMapDistance(const Eigen::Vector3d &position)
@@ -214,6 +211,10 @@ Node *RRTConnect::createNewNode(const Eigen::Vector3d &position, Node *parent)
 {
     Node *new_node = new Node{.position = position, .parent = parent, .children = std::vector<Node *>(), .id = node_counter_};
     node_counter_++;
+
+    if (parent != nullptr)
+        parent->children.push_back(new_node);
+
     return new_node;
 }
 
@@ -230,6 +231,7 @@ Node *RRTConnect::createRandomNode()
 
 std::pair<Node *, double> RRTConnect::findNearest(const Eigen::Vector3d &point)
 {
+    timer.start("Find Nearest");
     double min_dist = DBL_MAX;
     Node *closest = nullptr;
 
@@ -270,6 +272,8 @@ std::pair<Node *, double> RRTConnect::findNearest(const Eigen::Vector3d &point)
             }
         }
     }
+
+    timer.stop("Find Nearest");
 
     return std::make_pair(closest, min_dist);
 }
@@ -354,9 +358,24 @@ void RRTConnect::deleteNodes(Node *root)
     root = nullptr;
 }
 
+void RRTConnect::cleanupTree()
+{
+    deleteNodes(root_);
+
+    // Clear out the search structure
+    for (const std::vector<Node *>& vec : nodes_) {
+        vec.empty();
+    }
+
+    nodes_.empty();
+    rrt_path_.empty();
+    smoothed_path_.empty();
+    node_counter_ = -2;
+}
+
 void RRTConnect::cleanupPruning()
 {
-    for (const Node* node : pruning_nodes_)
+    for (const Node *node : pruning_nodes_)
     {
         delete node;
     }
@@ -421,7 +440,8 @@ bool RRTConnect::runSmoother(mav_trajectory_generation::Trajectory &trajectory)
 
 void RRTConnect::pruneRRTPath()
 {
-    int prune_count = 0;
+    int prune_count_l1 = 0;
+    int prune_count_l2 = 0;
 
     // Level 1 pruning
     int index_a;
@@ -437,6 +457,8 @@ void RRTConnect::pruneRRTPath()
     std::default_random_engine generator;
     std::uniform_real_distribution<float> distribution(0.2, 0.8);
 
+    fprintf(stderr, "%ld waypoints before pruning\n", rrt_path_.size());
+
     for (int i = 0; i < rrt_prune_iterations; i++)
     {
         // Pick two nodes at random (ensure index b is always greater than index a)
@@ -451,7 +473,7 @@ void RRTConnect::pruneRRTPath()
         candidate_a = (1 - shift_a) * rrt_path_[index_a]->position + shift_a * rrt_path_[index_a + 1]->position;
         candidate_b = (1 - shift_b) * rrt_path_[index_b]->position + shift_b * rrt_path_[index_b + 1]->position;
 
-        // The path between the two new positions is a shortcut. If its collision free, 
+        // The path between the two new positions is a shortcut. If its collision free,
         // add it into the path and remove the nodes that it skips
         if (!detectCollisionEdge(candidate_a, candidate_b))
         {
@@ -473,7 +495,7 @@ void RRTConnect::pruneRRTPath()
             rrt_path_.insert(rrt_path_.begin() + index_a + 1, new_b);
             rrt_path_.insert(rrt_path_.begin() + index_a + 1, new_a);
 
-            prune_count++;
+            prune_count_l1++;
         }
     }
 
@@ -492,20 +514,22 @@ void RRTConnect::pruneRRTPath()
             if (!detectCollisionEdge(start->position, end->position))
             {
                 rrt_path_.erase(rrt_path_.begin() + i + 1, rrt_path_.begin() + j);
-                prune_count++;
+                prune_count_l2++;
                 break;
             }
         }
     }
 
-    printf("Pruned %d time\n", prune_count);
+    printf("Level 1: Pruned %d times\n", prune_count_l1);
+    printf("Level 2: Pruned %d times\n", prune_count_l2);
+    fprintf(stderr, "%ld waypoints after pruning\n", rrt_path_.size());
 }
 
 void RRTConnect::visualizePaths()
 {
     // Get RRT Tree points
     std::vector<point_xyz> rrt_pc;
-    for (const Node* rrt_node : rrt_path_)
+    for (const Node *rrt_node : rrt_path_)
     {
         point_xyz pt;
         pt.x = rrt_node->position.x();
@@ -589,38 +613,103 @@ void RRTConnect::visualizeMap()
         pipe_server_write_point_cloud(vis_channel_, waypoints_meta, pc.data());
 }
 
+bool RRTConnect::fixTree(Node *new_root)
+{
+    Node *nearest_node;
+    double dist;
+
+    // Find nearest node in tree
+    std::tie(nearest_node, dist) = findNearest(new_root->position);
+
+    // Need to make sure the nearest node is reachable
+    if (detectCollisionEdge(nearest_node->position, new_root->position))
+        return false;
+
+    add(nearest_node, new_root);
+
+    // Root should always have parent as null
+    new_root->parent = nullptr;
+
+    Node *prev_node = new_root;
+    Node *cur_node = nearest_node;
+    Node *next_node = nearest_node->parent;
+
+    while (next_node != nullptr)
+    {
+        // 1. Change parent of current node to be previous node
+        // 2. Delete previous node from children list of current node
+        // 3. Add current node to children of previous node
+
+        cur_node->parent = prev_node;
+        cur_node->children.erase(std::find(cur_node->children.begin(), cur_node->children.end(), prev_node));
+        prev_node->children.push_back(cur_node);
+
+        prev_node = cur_node;
+        cur_node = next_node;
+        next_node = next_node->parent;
+    }
+
+    // Fix the root
+    cur_node->parent = prev_node;
+    cur_node->children.erase(std::find(cur_node->children.begin(), cur_node->children.end(), prev_node));
+    prev_node->children.push_back(cur_node);
+
+    return true;
+}
+
 bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector3d &endPos, mav_trajectory_generation::Trajectory &trajectory)
 {
+    computeMapBounds();
+
     timer.start("RRT Planner");
-    printf("Start = (%f, %f, %f), End = (%f, %f, %f)\n", startPos.x(), startPos.y(), startPos.z(), endPos.x(), endPos.y(), endPos.z());
 
     // Setup start and end nodes
-    Node *qStart = createNewNode(startPos, nullptr);
-    Node *qGoal = createNewNode(endPos, nullptr);
-    root_ = qStart;
+    Node *q_start = createNewNode(startPos, nullptr);
+    Node *q_goal = createNewNode(endPos, nullptr);
+
+    // If root is not null then we already have a tree. Fix up pointers before running the planning
+    if (root_ != nullptr)
+    {
+        fprintf(stderr, "RRT Tree already exists. Attempting to use for replanning...\n");
+        bool success = fixTree(q_start);
+
+        if (success)
+            fprintf(stderr, "RRT Tree fixed succesfully. Reusing for planning.\n");
+        else
+        {
+            fprintf(stderr, "Failed to reuse RRT tree for planning. Starting from scratch...\n");
+
+            // Delete the tree and start from scratch
+            cleanupTree();
+        }
+    }
+
+    root_ = q_start;
+
+    printTree(root_);
 
     // Insert start into search structure
-    int start_node_index = flatIndexfromPoint(qStart->position);
-    nodes_[start_node_index].push_back(qStart);
+    int start_node_index = flatIndexfromPoint(q_start->position);
+    nodes_[start_node_index].push_back(q_start);
 
     // Ensure that the start and end point are collision free
-    if (detectCollision(qStart->position))
+    if (detectCollision(q_start->position))
     {
         printf("ERROR: Start point is in collision\n");
         return false;
     }
-    else if (detectCollision(qGoal->position))
+    else if (detectCollision(q_goal->position))
     {
         printf("ERROR: End point is in collision\n");
         return false;
     }
 
     // Check if an immediate path from start to end exists
-    if (!detectCollisionEdge(qStart->position, qGoal->position))
+    if (!detectCollisionEdge(q_start->position, q_goal->position))
     {
         printf("Immediate collision free path found!\n");
-        rrt_path_.push_back(qStart);
-        rrt_path_.push_back(qGoal);
+        rrt_path_.push_back(q_start);
+        rrt_path_.push_back(q_goal);
 
         return runSmoother(trajectory);
     }
@@ -637,7 +726,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     {
         // Get random node or use goal
         if (attempts % 10 == 0)
-            q_rand = qGoal;
+            q_rand = q_goal;
         else
             q_rand = createRandomNode();
 
@@ -677,10 +766,10 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
                 add(q_near, q_rand);
 
                 // If we ran goal biasing then the end point would be the goal, so exit
-                if (q_rand == qGoal)
+                if (q_rand == q_goal)
                     break;
             }
-            else if (q_rand != qGoal)
+            else if (q_rand != q_goal)
             {
                 // Delete q_rand if we couldnt add to graph and it wasnt the goal node
                 delete q_rand;
@@ -688,11 +777,11 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
             }
 
             // Check if we can reach goal
-            std::tie(q_near, dist) = findNearest(qGoal->position);
+            std::tie(q_near, dist) = findNearest(q_goal->position);
 
             if (dist <= rrt_goal_threshold)
             {
-                add(q_near, qGoal);
+                add(q_near, q_goal);
                 break;
             }
         }
@@ -700,7 +789,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
         attempts++;
     }
 
-    if (qGoal->parent != nullptr)
+    if (q_goal->parent != nullptr)
     {
         printf("RRT solution found in %6.2fms and took %d attempts\n", (rc_nanos_monotonic_time() - start_time) / 1000000.0, attempts);
     }
@@ -710,8 +799,8 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
         return false;
     }
 
-    // Get the path from qGoal to qStart
-    Node *cur = qGoal;
+    // Get the path from q_goal to q_start
+    Node *cur = q_goal;
 
     while (cur->parent != nullptr)
     {
@@ -719,7 +808,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
         cur = cur->parent;
     }
 
-    // Add the last node which should be qStart
+    // Add the last node which should be q_start
     rrt_path_.push_back(cur);
 
     // Reverse path since we traveresed tree from leaf to root but we want root to leaf
@@ -728,7 +817,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     timer.start("Pruning");
     pruneRRTPath();
     timer.stop("Pruning");
-    
+
     timer.stop("RRT Planner");
 
     // Run smoother
@@ -740,14 +829,20 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
 
     visualizePaths();
 
-    if (rrt_send_map) 
+    if (rrt_send_map)
         visualizeMap();
+
+    // Cleanup extra nodes created due to pruning
+    cleanupPruning();
+
+    rrt_path_.clear();
 
     return smoother_success;
 }
 
-RRTConnect::~RRTConnect()
+void RRTConnect::tearDown()
 {
-    deleteNodes(root_);
+    cleanupTree();
     cleanupPruning();
+    esdf_map_.reset();
 }
