@@ -1010,7 +1010,7 @@ namespace voxblox
             server->updateEsdf(true);
 
             fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
-            fprintf(stderr, "using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
+            fprintf(stderr, "Using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
 
             pthread_mutex_unlock(&pose_mutex); // return mutex lock
             server->runPlanner(start_pose, goal_pose, &(server->path_to_follow));
@@ -1122,8 +1122,7 @@ namespace voxblox
 
             pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
 
-            // TODO: REMOVE THE + 1 ON THE Z POSE
-            start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z() - 1;
+            start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
 
             char *goal_ptr;
             goal_ptr = strtok(string, ":");
@@ -1221,6 +1220,7 @@ namespace voxblox
                 printf("Path coefficients too large\n");
                 return false;
             }
+            
             out.segments[i].n_coef = msg.segments[i].num_coeffs;
             out.segments[i].duration_s = msg.segments[i].segment_time / 1000000000.0;
             if (en_debug)
