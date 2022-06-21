@@ -965,7 +965,7 @@ namespace voxblox
                 publish2DCostmap();
             }
             // update at most every two seconds for now
-            if ((rc_nanos_monotonic_time() - start_time) / 1000 < 2000000)
+            if ((rc_nanos_monotonic_time() - start_time) / 1000 < 500000)
                 usleep(2000000 - ((rc_nanos_monotonic_time() - start_time) / 1000));
         }
     }
@@ -1143,7 +1143,7 @@ namespace voxblox
             server->updateEsdf(true);
 
             fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
-            fprintf(stderr, "using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
+            fprintf(stderr, "Using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
 
             pthread_mutex_unlock(&pose_mutex); // return mutex lock
             server->runPlanner(start_pose, goal_pose, &(server->path_to_follow));
