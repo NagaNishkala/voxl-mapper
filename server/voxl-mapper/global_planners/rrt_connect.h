@@ -27,7 +27,7 @@ class RRTConnect : public GlobalPlanner
 public:
     RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map_, int vis_channel);
 
-    bool createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector3d &endPos, mav_trajectory_generation::Trajectory &trajectory);
+    bool createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &end_pos, mav_trajectory_generation::Trajectory &trajectory);
 
     void tearDown();
 

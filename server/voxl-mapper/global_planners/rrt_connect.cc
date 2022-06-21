@@ -363,18 +363,19 @@ void RRTConnect::cleanupTree()
     deleteNodes(root_);
 
     // Clear out the search structure
-    for (const std::vector<Node *>& vec : nodes_) {
-        vec.empty();
+    for (std::vector<Node *> &vec : nodes_)
+    {
+        vec.clear();
     }
 
-    nodes_.empty();
-    smoothed_path_.empty();
+    nodes_.clear();
+    smoothed_path_.clear();
     node_counter_ = -2;
 }
 
 void RRTConnect::cleanupPruning()
 {
-    for (const Node *node : pruning_nodes_)
+    for (Node *node : pruning_nodes_)
     {
         delete node;
     }
@@ -382,7 +383,7 @@ void RRTConnect::cleanupPruning()
     pruning_nodes_.clear();
 }
 
-void RRTConnect::nodesToEigen(const std::vector<Node*> & rrt_path, mav_msgs::EigenTrajectoryPointVector &eigen_path)
+void RRTConnect::nodesToEigen(const std::vector<Node *> &rrt_path, mav_msgs::EigenTrajectoryPointVector &eigen_path)
 {
     // sanity checks
     if (rrt_path.empty())
@@ -414,7 +415,7 @@ bool RRTConnect::locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoint
     return got && success;
 }
 
-bool RRTConnect::runSmoother(const std::vector<Node*> &rrt_path, mav_trajectory_generation::Trajectory &trajectory)
+bool RRTConnect::runSmoother(const std::vector<Node *> &rrt_path, mav_trajectory_generation::Trajectory &trajectory)
 {
     printf("Running Smoother\n");
     uint64_t start_time = rc_nanos_monotonic_time();
@@ -437,7 +438,7 @@ bool RRTConnect::runSmoother(const std::vector<Node*> &rrt_path, mav_trajectory_
     }
 }
 
-void RRTConnect::pruneRRTPath(std::vector<Node*> &rrt_path)
+void RRTConnect::pruneRRTPath(std::vector<Node *> &rrt_path)
 {
     int prune_count_l1 = 0;
     int prune_count_l2 = 0;
@@ -524,7 +525,7 @@ void RRTConnect::pruneRRTPath(std::vector<Node*> &rrt_path)
     fprintf(stderr, "%ld waypoints after pruning\n", rrt_path.size());
 }
 
-void RRTConnect::visualizePaths(const std::vector<Node*> &rrt_path)
+void RRTConnect::visualizePaths(const std::vector<Node *> &rrt_path)
 {
     // Get RRT Tree points
     std::vector<point_xyz> rrt_pc;
@@ -539,7 +540,7 @@ void RRTConnect::visualizePaths(const std::vector<Node*> &rrt_path)
 
     // Get Smoothed path points
     std::vector<point_xyz> smooth_path_pc;
-    for (const auto &trajectory_point : smoothed_path_)
+    for (const mav_msgs::EigenTrajectoryPoint &trajectory_point : smoothed_path_)
     {
         point_xyz pt;
         pt.x = trajectory_point.position_W.x();
@@ -656,7 +657,7 @@ bool RRTConnect::fixTree(Node *new_root)
     return true;
 }
 
-bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector3d &endPos, mav_trajectory_generation::Trajectory &trajectory)
+bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &end_pos, mav_trajectory_generation::Trajectory &trajectory)
 {
     timer.start("Precompute map bounds");
     computeMapBounds();
@@ -665,10 +666,10 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     timer.start("RRT Planner");
 
     // Setup start and end nodes
-    Node *q_start = createNewNode(startPos, nullptr);
-    Node *q_goal = createNewNode(endPos, nullptr);
+    Node *q_start = createNewNode(start_pos, nullptr);
+    Node *q_goal = createNewNode(end_pos, nullptr);
 
-    // TODO: Need to handle case where global map has changed and casued a disconnect somewhere in the tree
+    // TODO: Need to handle case where global map has changed and caused a disconnect somewhere in the tree
     // If root is not null then we already have a tree. Fix up pointers before running the planning
     // if (root_ != nullptr)
     // {
@@ -690,7 +691,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     // }
 
     root_ = q_start;
-    std::vector<Node*> rrt_path;
+    std::vector<Node *> rrt_path;
 
     // Insert start into search structure
     int start_node_index = flatIndexfromPoint(q_start->position);
@@ -700,11 +701,13 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     if (detectCollision(q_start->position))
     {
         printf("ERROR: Start point is in collision\n");
+        timer.stopAll();
         return false;
     }
     else if (detectCollision(q_goal->position))
     {
         printf("ERROR: End point is in collision\n");
+        timer.stopAll();
         return false;
     }
 
@@ -715,7 +718,15 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
         rrt_path.push_back(q_start);
         rrt_path.push_back(q_goal);
 
-        return runSmoother(rrt_path, trajectory);
+        bool succ = runSmoother(rrt_path, trajectory);
+
+        visualizePaths(rrt_path);
+
+        if (rrt_send_map)
+            visualizeMap();
+
+        timer.stopAll();
+        return succ;
     }
 
     uint64_t start_time = rc_nanos_monotonic_time();
@@ -734,60 +745,61 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
         else
             q_rand = createRandomNode();
 
-        if (q_rand)
+        // Try again if we couldnt get a random node
+        if (!q_rand)
+            continue;
+
+        collision_found = false;
+
+        // Find nearest node in tree
+        std::tie(q_near, dist) = findNearest(q_rand->position);
+
+        Eigen::Vector3d dir_vec = ((q_rand->position - q_near->position) / dist);
+
+        // Continually step towards q_rand by rrt_min_distance and add a node if its collision free
+        // Optimization: Use squared distances to avoid having to do the square root which is more expensive
+        while ((q_rand->position - q_near->position).squaredNorm() > pow(rrt_min_distance, 2))
         {
-            collision_found = false;
+            q_connect = createNewNode(q_near->position + rrt_min_distance * dir_vec, nullptr);
 
-            // Find nearest node in tree
-            std::tie(q_near, dist) = findNearest(q_rand->position);
-
-            Eigen::Vector3d dir_vec = ((q_rand->position - q_near->position) / dist);
-
-            // Continually step towards q_rand by rrt_min_distance and add a node if its collision free
-            // Optimization: Use squared distances to avoid having to do the square root which is more expensive
-            while ((q_rand->position - q_near->position).squaredNorm() > pow(rrt_min_distance, 2))
+            if (!detectCollisionEdge(q_near->position, q_connect->position, true))
             {
-                q_connect = createNewNode(q_near->position + rrt_min_distance * dir_vec, nullptr);
-
-                if (!detectCollisionEdge(q_near->position, q_connect->position, true))
-                {
-                    add(q_near, q_connect);
-                    q_near = q_connect;
-                }
-                else
-                {
-                    // The current node is in collision so it is not added to the tree and needs to be deleted
-                    delete q_connect;
-                    q_connect = nullptr;
-                    collision_found = true;
-                    break;
-                }
+                add(q_near, q_connect);
+                q_near = q_connect;
             }
-
-            // Add q_rand only if the while loop succesfully finished and its collision free
-            if (!collision_found && !detectCollisionEdge(q_near->position, q_rand->position))
+            else
             {
-                add(q_near, q_rand);
-
-                // If we ran goal biasing then the end point would be the goal, so exit
-                if (q_rand == q_goal)
-                    break;
-            }
-            else if (q_rand != q_goal)
-            {
-                // Delete q_rand if we couldnt add to graph and it wasnt the goal node
-                delete q_rand;
-                q_rand = nullptr;
-            }
-
-            // Check if we can reach goal
-            std::tie(q_near, dist) = findNearest(q_goal->position);
-
-            if (dist <= rrt_goal_threshold)
-            {
-                add(q_near, q_goal);
+                // The current node is in collision so it is not added to the tree and needs to be deleted
+                delete q_connect;
+                q_connect = nullptr;
+                collision_found = true;
                 break;
             }
+        }
+
+        // Add q_rand only if the while loop succesfully finished and its collision free
+        if (!collision_found && !detectCollisionEdge(q_near->position, q_rand->position))
+        {
+            add(q_near, q_rand);
+
+            // If we ran goal biasing then the end point would be the goal, so exit
+            if (q_rand == q_goal)
+                break;
+        }
+        else if (q_rand != q_goal)
+        {
+            // Delete q_rand if we couldnt add to graph and it wasnt the goal node
+            delete q_rand;
+            q_rand = nullptr;
+        }
+
+        // Check if we can reach goal
+        std::tie(q_near, dist) = findNearest(q_goal->position);
+
+        if (dist <= rrt_goal_threshold)
+        {
+            add(q_near, q_goal);
+            break;
         }
 
         attempts++;
@@ -800,20 +812,17 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
     else
     {
         printf("RRT solution not found. Planning exceeded %6.2fms and took %d attempts\n", rrt_max_runtime_nanoseconds / 1000000.0, attempts);
+        timer.stopAll();
         return false;
     }
 
     // Get the path from q_goal to q_start
     Node *cur = q_goal;
-
-    while (cur->parent != nullptr)
+    while (cur != nullptr)
     {
         rrt_path.push_back(cur);
         cur = cur->parent;
     }
-
-    // Add the last node which should be q_start
-    rrt_path.push_back(cur);
 
     // Reverse path since we traveresed tree from leaf to root but we want root to leaf
     std::reverse(rrt_path.begin(), rrt_path.end());
@@ -838,7 +847,9 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &startPos, const Eigen::Vector
 
     // Cleanup extra nodes created due to pruning
     cleanupPruning();
+    cleanupTree(); // TODO: Remove once replanning is finished
 
+    timer.stopAll();
     return smoother_success;
 }
 
