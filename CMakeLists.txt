@@ -8,9 +8,12 @@ set(CMAKE_C_FLAGS "-std=gnu99 -Wall -Wextra -Wuninitialized \
 	-Wunused-variable -Wno-double-promotion -Wmissing-prototypes \
 	-Wmissing-declarations -Werror=undef -Wno-unused-function ${CMAKE_C_FLAGS}")
 
-set(CMAKE_CXX_FLAGS "-std=gnu++14 -O3 -Wall -Wextra -Wuninitialized -Wattributes \
+set(CMAKE_CXX_FLAGS "-std=gnu++14 -Wall -Wextra -Wuninitialized -Wattributes \
 	-Wunused-but-set-variable -Wdouble-promotion -Wno-missing-field-initializers \
 	-Wmissing-declarations -Werror=undef -Wno-unused-function ${CMAKE_CXX_FLAGS}")
+
+# Optimization flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fsee -fomit-frame-pointer -fno-signed-zeros -fno-math-errno -funroll-loops")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^aarch64")
 	set(LIB_INSTALL_DIR /usr/lib64)
