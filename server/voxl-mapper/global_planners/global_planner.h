@@ -25,14 +25,14 @@ public:
     /**
      * @brief Run the planner to solve for a path through the map
      *
-     * @param startPos Starting position for planner
-     * @param endPos Goal position for planner
+     * @param start_pos Starting position for planner
+     * @param end_pos Goal position for planner
      * @param trajectory The returned trajectory that is collision free through the map
      * @return true If a path was found
      * @return false If no path was found
      */
-    virtual bool createPlan(const Eigen::Vector3d &startPos,
-                            const Eigen::Vector3d &endPos,
+    virtual bool createPlan(const Eigen::Vector3d &start_pos,
+                            const Eigen::Vector3d &end_pos,
                             mav_trajectory_generation::Trajectory &trajectory) = 0;
 
     virtual ~GlobalPlanner() {};
