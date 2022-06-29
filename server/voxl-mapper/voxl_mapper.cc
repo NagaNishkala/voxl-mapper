@@ -10,7 +10,6 @@
 #include <mav_local_planner/conversions.h>
 #include <mav_trajectory_generation/trajectory_sampling.h>
 
-
 #define PROCESS_NAME "voxl-mapper"
 
 #define RAINBOW_REPEAT_DIST 3
@@ -59,6 +58,8 @@
 
 #define CONTROL_COMMANDS (PLAN_HOME "," RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," PLAN_TO "," FOLLOW_PATH "," SLICE_LVL_UPDATE)
 
+#define VIS_UPDATE_RATE 2
+
 pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t esdf_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t tsdf_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -70,10 +71,10 @@ namespace voxblox
 
     TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::Config &integrator_config,
                            const MeshIntegratorConfig &mesh_config, bool debug, bool timing)
-                           : en_debug(debug), 
-                             en_timing(timing), 
-                             planner_(nullptr),
-                             costmap_updates_only(false)
+        : en_debug(debug),
+          en_timing(timing),
+          planner_(nullptr),
+          costmap_updates_only(false)
     {
 
         tsdf_map_.reset(new TsdfMap(config));
@@ -130,6 +131,45 @@ namespace voxblox
         return ((uint64_t)ts.tv_sec * 1000000000) + ts.tv_nsec;
     }
 
+    int TsdfServer::loop_sleep(double rate_hz)
+    {
+        // static variable so we remember when we last woke up
+        static int64_t next_time = 0;
+
+        int64_t current_time = rc_nanos_monotonic_time();
+
+        if (next_time <= 0)
+            next_time = current_time;
+
+        // try to maintain output data rate
+        next_time += (1000000000.0 / rate_hz);
+
+        // uh oh, we fell behind, warn and get back on track
+        if (next_time <= current_time)
+        {
+            fprintf(stderr, "WARNING loop_sleep fell behind\n");
+            return -1;
+        }
+
+        nanosleep_for(next_time - current_time);
+        return 0;
+    }
+
+    void TsdfServer::nanosleep_for(uint64_t ns)
+    {
+        struct timespec req, rem;
+        req.tv_sec = ns / 1000000000;
+        req.tv_nsec = ns % 1000000000;
+        // loop untill nanosleep sets an error or finishes successfully
+        errno = 0; // reset errno to avoid false detection
+        while (nanosleep(&req, &rem) && errno == EINTR)
+        {
+            req.tv_sec = rem.tv_sec;
+            req.tv_nsec = rem.tv_nsec;
+        }
+        return;
+    }
+
     rc_tf_t TsdfServer::get_rc_tf_t(int ch)
     {
         switch (ch)
@@ -155,7 +195,7 @@ namespace voxblox
         }
     }
 
-    int64_t TsdfServer::get_dif_per_frame(int ch)
+    uint64_t TsdfServer::get_dif_per_frame(int ch)
     {
         switch (ch)
         {
@@ -213,18 +253,15 @@ namespace voxblox
 
     void TsdfServer::_tof_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context)
     {
-        static int64_t prev_ts = 0;
+        static uint64_t prev_ts = 0;
         // class instance
         TsdfServer *server = (TsdfServer *)context;
 
         // can do this statically since this is not a shared cb
         // only one tof input as of now
         static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
-        static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+        static uint64_t fixed_ts_dif = server->get_dif_per_frame(ch);
         static int aligned_index = server->get_index_by_ch(ch);
-
-        if (server->planning)
-            return;
 
         // check if falling behind
         if (pipe_client_bytes_in_pipe(ch) > 0)
@@ -392,8 +429,9 @@ namespace voxblox
 
         // clear small sphere (0.2m radius) around our drones pose in the esdf map
         start_time = server->rc_nanos_monotonic_time();
-        server->esdf_integrator_->addNewRobotPosition(Point(_curr_pose.x(), _curr_pose.y(), _curr_pose.z()));
+        server->addNewRobotPositionToEsdf(_curr_pose.x(), _curr_pose.y(), _curr_pose.z());
         end_time = server->rc_nanos_monotonic_time();
+
         if (server->en_timing)
         {
             printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
@@ -401,58 +439,55 @@ namespace voxblox
         return;
     }
 
-    void TsdfServer::depth_helper0(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void *data, void *context)
+    void TsdfServer::depth_helper0(int ch, point_cloud_metadata_t meta, void *data, void *context)
     {
         static TsdfServer *server = (TsdfServer *)context;
 
         static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
-        static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+        static uint64_t fixed_ts_dif = server->get_dif_per_frame(ch);
         static int aligned_index = server->get_index_by_ch(ch);
 
         _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
     }
 
-    void TsdfServer::depth_helper1(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void *data, void *context)
+    void TsdfServer::depth_helper1(int ch, point_cloud_metadata_t meta, void *data, void *context)
     {
         static TsdfServer *server = (TsdfServer *)context;
 
         static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
-        static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+        static uint64_t fixed_ts_dif = server->get_dif_per_frame(ch);
         static int aligned_index = server->get_index_by_ch(ch);
 
         _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
     }
 
-    void TsdfServer::depth_helper2(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void *data, void *context)
+    void TsdfServer::depth_helper2(int ch, point_cloud_metadata_t meta, void *data, void *context)
     {
         static TsdfServer *server = (TsdfServer *)context;
 
         static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
-        static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+        static uint64_t fixed_ts_dif = server->get_dif_per_frame(ch);
         static int aligned_index = server->get_index_by_ch(ch);
 
         _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
     }
 
-    void TsdfServer::depth_helper3(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void *data, void *context)
+    void TsdfServer::depth_helper3(int ch, point_cloud_metadata_t meta, void *data, void *context)
     {
         static TsdfServer *server = (TsdfServer *)context;
 
         static rc_tf_t tf_cam_wrt_body = server->get_rc_tf_t(ch);
-        static int64_t fixed_ts_dif = server->get_dif_per_frame(ch);
+        static uint64_t fixed_ts_dif = server->get_dif_per_frame(ch);
         static int aligned_index = server->get_index_by_ch(ch);
 
         _stereo_pc_helper_cb(ch, meta, tf_cam_wrt_body, fixed_ts_dif, aligned_index, data, context);
     }
 
-    void TsdfServer::_stereo_pc_helper_cb(int ch, point_cloud_metadata_t &meta, rc_tf_t &tf_cam_wrt_body, int64_t &fixed_ts_dif, int &aligned_index, void *data, void *context)
+    void TsdfServer::_stereo_pc_helper_cb(int ch, point_cloud_metadata_t &meta, rc_tf_t &tf_cam_wrt_body, uint64_t &fixed_ts_dif, int &aligned_index, void *data, void *context)
     {
-        static int64_t prev_ts = 0;
+        static uint64_t prev_ts = 0;
         // class instance
         TsdfServer *server = (TsdfServer *)context;
-
-        if (server->planning)
-            return;
 
         // check if falling behind
         if (pipe_client_bytes_in_pipe(ch) > 0)
@@ -599,11 +634,9 @@ namespace voxblox
         pthread_mutex_unlock(&pose_mutex);
 
         // PHEW, finally, send in the point cloud to TSDF
-        pthread_mutex_lock(&tsdf_mutex);
         uint64_t start_time = server->rc_nanos_monotonic_time();
         server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
         uint64_t end_time = server->rc_nanos_monotonic_time();
-        pthread_mutex_unlock(&tsdf_mutex);
 
         if (server->en_timing)
         {
@@ -611,22 +644,19 @@ namespace voxblox
         }
 
         // clear small sphere (0.2m radius) around our drones pose in the esdf map
-        pthread_mutex_lock(&esdf_mutex);
         start_time = server->rc_nanos_monotonic_time();
-        server->esdf_integrator_->addNewRobotPosition(Point(_curr_pose.x(), _curr_pose.y(), _curr_pose.z()));
+        server->addNewRobotPositionToEsdf(_curr_pose.x(), _curr_pose.y(), _curr_pose.z());
         end_time = server->rc_nanos_monotonic_time();
-        pthread_mutex_unlock(&esdf_mutex);
 
         if (server->en_timing)
-        {
             printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
-        }
+
         return;
     }
 
     void TsdfServer::_pc_disconnect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context)
     {
-        fprintf(stderr, "\r" CLEAR_LINE FONT_BLINK "Disconnected from Ptcloud server\n" RESET_FONT);
+        fprintf(stderr, "Disconnected from Ptcloud server\n");
     }
 
     void TsdfServer::_vio_connect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context)
@@ -655,7 +685,7 @@ namespace voxblox
 
     void TsdfServer::_vio_disconnect_cb(__attribute__((unused)) int ch, __attribute__((unused)) void *context)
     {
-        printf("\r" CLEAR_LINE FONT_BLINK "Disconnected from VIO server\n");
+        printf("Disconnected from VIO server\n");
     }
 
     int TsdfServer::initMPA()
@@ -794,7 +824,7 @@ namespace voxblox
         esdf_map_.reset(new EsdfMap(esdf_map_config));
         esdf_integrator_.reset(new EsdfIntegrator(esdf_int_config, tsdf_map_->getTsdfLayerPtr(), esdf_map_->getEsdfLayerPtr()));
 
-        planner_ = new RRTConnect(esdf_map_, RENDER_CH);
+        planner_.reset(new RRTConnect(esdf_map_, RENDER_CH));
         planner_->setup();
 
         keep_updating = true;
@@ -820,7 +850,17 @@ namespace voxblox
         {
             fprintf(stderr, "Pointcloud and Colors are not of the same size: %s\n", __FUNCTION__);
         }
+
+        pthread_mutex_lock(&tsdf_mutex);
         tsdf_integrator_->integratePointCloud(T_G_C, ptcloud_C, colors, is_freespace_pointcloud);
+        pthread_mutex_unlock(&tsdf_mutex);
+    }
+
+    void TsdfServer::addNewRobotPositionToEsdf(float x, float y, float z)
+    {
+        pthread_mutex_lock(&esdf_mutex);
+        esdf_integrator_->addNewRobotPosition(Point(x, y, z));
+        pthread_mutex_unlock(&esdf_mutex);
     }
 
     void TsdfServer::publish2DCostmap()
@@ -830,8 +870,11 @@ namespace voxblox
         static Eigen::Vector3d upper_bound;
 
         if (counter % 5 == 0)
-        { // this needs to be dialed in, not sure if every 5 cmaps is good enough to regauge scale
+        { 
+            // this needs to be dialed in, not sure if every 5 cmaps is good enough to regauge scale
+            pthread_mutex_lock(&esdf_mutex);
             voxblox::utils::computeMapBoundsFromLayer(*esdf_map_->getEsdfLayerPtr(), &lower_bound, &upper_bound);
+            pthread_mutex_unlock(&esdf_mutex);
             counter = 0;
             costmap_updates_only = false;
         }
@@ -845,14 +888,15 @@ namespace voxblox
         dif *= (costmap_height / 100);
         height -= dif;
 
-        if (planning)
-            return;
-
         if (en_debug)
             printf("Generating CostMap\n");
+
+        pthread_mutex_lock(&esdf_mutex);
         uint64_t start_time = rc_nanos_monotonic_time();
         create2DCostmap(esdf_map_->getEsdfLayer(), height, cost_map, costmap_updates_only);
         uint64_t end_time = rc_nanos_monotonic_time();
+        pthread_mutex_unlock(&esdf_mutex);
+
         if (en_timing)
         {
             printf("Generating CostMap Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
@@ -894,30 +938,32 @@ namespace voxblox
 
     void TsdfServer::updateEsdf(bool clear_updated_flag)
     {
-        if (planning)
-            return;
         if (en_debug)
             printf("Updating ESDF Map\n");
+
+        pthread_mutex_lock(&esdf_mutex);
         uint64_t start_time = rc_nanos_monotonic_time();
         esdf_integrator_->updateFromTsdfLayer(clear_updated_flag);
         uint64_t end_time = rc_nanos_monotonic_time();
+        pthread_mutex_unlock(&esdf_mutex);
+
         if (en_timing)
             printf("Updating ESDF Map Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
     }
 
     void TsdfServer::updateMesh()
     {
-        if (planning)
-            return; // || keep_checking) return;
         if (en_debug)
             printf("Updating mesh\n");
 
         constexpr bool only_mesh_updated_blocks = true;
         constexpr bool clear_updated_flag = true;
 
+        pthread_mutex_lock(&tsdf_mutex);
         uint64_t start_time = rc_nanos_monotonic_time();
         mesh_integrator_->generateMesh(only_mesh_updated_blocks, clear_updated_flag);
         uint64_t end_time = rc_nanos_monotonic_time();
+        pthread_mutex_unlock(&tsdf_mutex);
 
         if (en_timing)
             printf("Generating Mesh Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
@@ -949,35 +995,34 @@ namespace voxblox
 
     void TsdfServer::visual_updates_thread_worker()
     {
-        static int64_t start_time;
         while (keep_updating)
         {
-            if (!planning)
-            {
-                start_time = rc_nanos_monotonic_time();
-                updateMesh();
-                // ***WARN***
-                // cannot update the esdf map when it is being used for collision checking in the planner
-                // after a path plan completes, updating the esdf map will take SIGNIFICANTLY longer after
-                // multiple skipped updates
-                // **********
-                updateEsdf(true);
-                publish2DCostmap();
-            }
+            updateMesh();
+            // ***WARN***
+            // cannot update the esdf map when it is being used for collision checking in the planner
+            // after a path plan completes, updating the esdf map will take SIGNIFICANTLY longer after
+            // multiple skipped updates
+            // **********
+            updateEsdf(true);
+            publish2DCostmap();
+
             // update at most every two seconds for now
-            if ((rc_nanos_monotonic_time() - start_time) / 1000 < 500000)
-                usleep(2000000 - ((rc_nanos_monotonic_time() - start_time) / 1000));
+            loop_sleep(VIS_UPDATE_RATE);
         }
     }
 
     void TsdfServer::clear()
     {
-        planning = true;
-        usleep(250000);
-        tsdf_map_->getTsdfLayerPtr()->removeAllBlocks();
+        // This may be a little dangerous - could get deadlocked when trying to get
+        // mutex locks if another thread is locking both in reverse order
+        pthread_mutex_lock(&esdf_mutex);
+        pthread_mutex_lock(&tsdf_mutex);
         esdf_map_->getEsdfLayerPtr()->removeAllBlocks();
+        tsdf_map_->getTsdfLayerPtr()->removeAllBlocks();
+        pthread_mutex_unlock(&tsdf_mutex);
+        pthread_mutex_unlock(&esdf_mutex);
+
         mesh_layer_->clear();
-        planning = false;
         cost_map.clear();
         costmap_updates_only = false;
     }
@@ -995,26 +1040,21 @@ namespace voxblox
         if (strcmp(string, PLAN_HOME) == 0)
         {
             printf("Client requested plan home.\n");
-            server->planning = true;
             Eigen::Vector3d start_pose, goal_pose;
 
             pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-
             start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
+            pthread_mutex_unlock(&pose_mutex); // return mutex lock
 
             goal_pose << 0.0, 0.0, -1.5;
 
-            server->esdf_integrator_->addNewRobotPosition(Point(start_pose.x(), start_pose.y(), start_pose.z()));
-            usleep(125000);
-
+            server->addNewRobotPositionToEsdf(start_pose.x(), start_pose.y(), start_pose.z());
             server->updateEsdf(true);
 
             fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
             fprintf(stderr, "Using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
 
-            pthread_mutex_unlock(&pose_mutex); // return mutex lock
             server->runPlanner(start_pose, goal_pose, &(server->path_to_follow));
-            server->planning = false;
             return;
         }
         else if (strcmp(string, RESET_VIO) == 0)
@@ -1045,8 +1085,8 @@ namespace voxblox
             // if msg includes the filepath
             if (f_name != NULL)
             {
-                std::string esdf_path = "/data/voxl_mapper/esdf_";
-                std::string tsdf_path = "/data/voxl_mapper/tsdf_";
+                std::string esdf_path = "/data/voxl-mapper/esdf_";
+                std::string tsdf_path = "/data/voxl-mapper/tsdf_";
 
                 esdf_path.append(f_name);
                 tsdf_path.append(f_name);
@@ -1081,8 +1121,8 @@ namespace voxblox
             // if msg includes the filepath
             if (f_name != NULL)
             {
-                std::string esdf_path = "/data/voxl_mapper/esdf_";
-                std::string tsdf_path = "/data/voxl_mapper/tsdf_";
+                std::string esdf_path = "/data/voxl-mapper/esdf_";
+                std::string tsdf_path = "/data/voxl-mapper/tsdf_";
 
                 esdf_path.append(f_name);
                 tsdf_path.append(f_name);
@@ -1114,15 +1154,13 @@ namespace voxblox
         }
         else if (strncmp(string, PLAN_TO, 7) == 0)
         {
-            server->planning = true;
-
             printf("Client requested plan to location\n");
 
             Eigen::Vector3d start_pose, goal_pose;
 
             pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-
             start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
+            pthread_mutex_unlock(&pose_mutex); // return mutex lock
 
             char *goal_ptr;
             goal_ptr = strtok(string, ":");
@@ -1137,18 +1175,13 @@ namespace voxblox
 
             goal_pose << x, y, z;
 
-            server->esdf_integrator_->addNewRobotPosition(Point(start_pose.x(), start_pose.y(), start_pose.z()));
-            usleep(125000);
-
+            server->addNewRobotPositionToEsdf(start_pose.x(), start_pose.y(), start_pose.z());
             server->updateEsdf(true);
 
             fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
             fprintf(stderr, "Using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
 
-            pthread_mutex_unlock(&pose_mutex); // return mutex lock
             server->runPlanner(start_pose, goal_pose, &(server->path_to_follow));
-
-            server->planning = false;
             return;
         }
         else if (strcmp(string, FOLLOW_PATH) == 0)
@@ -1183,7 +1216,9 @@ namespace voxblox
         if (en_debug)
             fprintf(stderr, "STARTING SOLVE\n");
 
+        pthread_mutex_lock(&esdf_mutex);
         bool success = planner_->createPlan(start_pose, goal_pose, *path_to_follow);
+        pthread_mutex_unlock(&esdf_mutex);
 
         return success;
     }
@@ -1220,11 +1255,11 @@ namespace voxblox
                 printf("Path coefficients too large\n");
                 return false;
             }
-            
+
             out.segments[i].n_coef = msg.segments[i].num_coeffs;
             out.segments[i].duration_s = msg.segments[i].segment_time / 1000000000.0;
-            if (en_debug)
-                fprintf(stderr, "duration of segment %ld: %6.5f\n", i, out.segments[i].duration_s);
+            // if (en_debug)
+            fprintf(stderr, "duration of segment %ld: %6.5f\n", i, out.segments[i].duration_s);
 
             for (int j = 0; j < out.segments[i].n_coef; j++)
             {
@@ -1242,14 +1277,20 @@ namespace voxblox
 
     bool TsdfServer::saveMap(std::string tsdf_path, std::string esdf_path)
     {
+        pthread_mutex_lock(&tsdf_mutex);
         bool tsdf_saved = tsdf_map_->getTsdfLayer().saveToFile(tsdf_path, true);
+        pthread_mutex_unlock(&tsdf_mutex);
+
+
+        pthread_mutex_lock(&esdf_mutex);
         bool esdf_saved = esdf_map_->getEsdfLayer().saveToFile(esdf_path, true);
+        pthread_mutex_unlock(&esdf_mutex);
+
         return (tsdf_saved && esdf_saved);
     }
 
     bool TsdfServer::loadMap(std::string tsdf_path, std::string esdf_path)
     {
-        planning = true;
         constexpr bool mult_layer_support = true;
 
         if (tsdf_map_->getTsdfLayerPtr() == nullptr)
@@ -1264,29 +1305,27 @@ namespace voxblox
             return false;
         }
 
+        pthread_mutex_lock(&tsdf_mutex);
         bool tsdf_loaded = tsdf_map_->getTsdfLayerPtr()->loadBlocksFromFile(
             tsdf_path, Layer<TsdfVoxel>::BlockMergingStrategy::kReplace,
             mult_layer_support);
+        pthread_mutex_unlock(&tsdf_mutex);
 
         if (tsdf_loaded)
-        {
             printf("Successfully loaded TSDF layer.\n");
-        }
         else
             return false;
 
+        pthread_mutex_lock(&esdf_mutex);
         bool esdf_loaded = esdf_map_->getEsdfLayerPtr()->loadBlocksFromFile(
             esdf_path, Layer<EsdfVoxel>::BlockMergingStrategy::kReplace,
             mult_layer_support);
+        pthread_mutex_unlock(&esdf_mutex);
 
         if (esdf_loaded)
-        {
             printf("Successfully loaded ESDF layer.\n");
-        }
+
         costmap_updates_only = false;
-        // updateEsdf(false);
-        usleep(250000);
-        planning = false;
 
         return (tsdf_loaded && esdf_loaded);
     }

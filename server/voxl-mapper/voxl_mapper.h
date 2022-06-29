@@ -47,19 +47,22 @@ public:
     static void depth_helper1(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
     static void depth_helper2(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
     static void depth_helper3(__attribute__((unused)) int ch, point_cloud_metadata_t meta, void* data, void* context);
-    static void _stereo_pc_helper_cb( int ch, point_cloud_metadata_t &meta, rc_tf_t &tf_cam_wrt_body, int64_t &fixed_ts_dif, int &aligned_index, void* data, void* context);
+    static void _stereo_pc_helper_cb( int ch, point_cloud_metadata_t &meta, rc_tf_t &tf_cam_wrt_body, uint64_t &fixed_ts_dif, int &aligned_index, void* data, void* context);
     /// general mpa
     int initMPA();
     void closeMPA();
 
     /// timing
-    uint64_t rc_nanos_thread_time(void);
     uint64_t rc_nanos_monotonic_time(void);
+    int loop_sleep(double rate_hz);
+    void nanosleep_for(uint64_t ns);
 
     /// integration
     void integratePointcloud(const Transformation &T_G_C,
                              const Pointcloud &ptcloud_C, const Colors &colors,
                              const bool is_freespace_pointcloud = false);
+
+    void addNewRobotPositionToEsdf(float x, float y, float z);
 
     /// Incremental update
     virtual void updateEsdf(bool clear_updated_flag);
@@ -91,14 +94,12 @@ public:
 
     // helpers
     rc_tf_t get_rc_tf_t(int ch);
-    int64_t get_dif_per_frame(int ch);
+    uint64_t get_dif_per_frame(int ch);
     int get_index_by_ch(int ch);
 
 
 protected:
-    /// boolean showing if we are planning, used to stop other background processes
-    bool planning = false;
-    GlobalPlanner *planner_;
+    std::unique_ptr<GlobalPlanner> planner_;
 
     /// base costmap built, can do incremental updates from now on (when true)
     bool costmap_updates_only;
