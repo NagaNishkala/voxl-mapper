@@ -377,9 +377,9 @@ int config_file_read(void)
 	json_fetch_double_with_default(parent, "robot_radius", &robot_radius, 0.3);
 	json_fetch_float_with_default(parent, "voxel_size", &voxel_size, 0.2);
     json_fetch_int_with_default(parent, "voxels_per_side", &voxels_per_side, 16u);
-	json_fetch_string_with_default(parent, "esdf_save_path", esdf_save_path, BUF_LEN, "/data/voxl_mapper/esdf_map");
-	json_fetch_string_with_default(parent, "tsdf_save_path", tsdf_save_path, BUF_LEN, "/data/voxl_mapper/tsdf_map");
-	json_fetch_string_with_default(parent, "mesh_save_path", mesh_save_path, BUF_LEN, "/data/voxl_mapper/mesh.ply");
+	json_fetch_string_with_default(parent, "esdf_save_path", esdf_save_path, BUF_LEN, "/data/voxl-mapper/esdf_map");
+	json_fetch_string_with_default(parent, "tsdf_save_path", tsdf_save_path, BUF_LEN, "/data/voxl-mapper/tsdf_map");
+	json_fetch_string_with_default(parent, "mesh_save_path", mesh_save_path, BUF_LEN, "/data/voxl-mapper/mesh.ply");
 
 	json_fetch_float_with_default(parent, "esdf_max_distance", &esdf_max_distance, 4.0);
 	json_fetch_float_with_default(parent, "esdf_min_distance", &esdf_min_distance, 0.1);
