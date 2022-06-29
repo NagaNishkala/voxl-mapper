@@ -116,7 +116,7 @@ inline void generateVoxbloxMeshMsg(int ch, MeshLayer* mesh_layer, voxblox_msgs::
     char *current = (char *)data + sizeof(mesh_metadata_t);
 
 
-    for (int j = 0; j < connected_mesh.vertices.size(); j++) {
+    for (size_t j = 0; j < connected_mesh.vertices.size(); j++) {
 
         mesh_vertex_t *vertex = (mesh_vertex_t *)current;
         current += sizeof(mesh_vertex_t);
