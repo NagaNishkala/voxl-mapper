@@ -408,15 +408,6 @@ namespace voxblox
             _colors[i].a = 127;
         }
 
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        // drone position
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        Eigen::Vector3d _curr_pose;
-        _curr_pose << tf_tof_wrt_fixed.d[0][3], tf_tof_wrt_fixed.d[1][3], tf_tof_wrt_fixed.d[2][3];
-        pthread_mutex_lock(&pose_mutex);
-        server->curr_pose = _curr_pose;
-        pthread_mutex_unlock(&pose_mutex);
-
         // PHEW, finally, send in the point cloud to TSDF
         uint64_t start_time = server->rc_nanos_monotonic_time();
         server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
@@ -426,6 +417,12 @@ namespace voxblox
         {
             printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
         }
+
+        // Get drones position
+        Eigen::Vector3d _curr_pose;
+        pthread_mutex_lock(&pose_mutex);
+        _curr_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
+        pthread_mutex_unlock(&pose_mutex);
 
         // clear small sphere (0.2m radius) around our drones pose in the esdf map
         start_time = server->rc_nanos_monotonic_time();
@@ -624,15 +621,6 @@ namespace voxblox
             _colors[i].a = 127;
         }
 
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        // drone position
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        Eigen::Vector3d _curr_pose;
-        _curr_pose << tf_tof_wrt_fixed.d[0][3], tf_tof_wrt_fixed.d[1][3], tf_tof_wrt_fixed.d[2][3];
-        pthread_mutex_lock(&pose_mutex);
-        server->curr_pose = _curr_pose;
-        pthread_mutex_unlock(&pose_mutex);
-
         // PHEW, finally, send in the point cloud to TSDF
         uint64_t start_time = server->rc_nanos_monotonic_time();
         server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
@@ -642,6 +630,12 @@ namespace voxblox
         {
             printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
         }
+
+        // Get drones position
+        Eigen::Vector3d _curr_pose;
+        pthread_mutex_lock(&pose_mutex);
+        _curr_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
+        pthread_mutex_unlock(&pose_mutex);
 
         // clear small sphere (0.2m radius) around our drones pose in the esdf map
         start_time = server->rc_nanos_monotonic_time();
@@ -666,6 +660,8 @@ namespace voxblox
 
     void TsdfServer::_vio_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, __attribute__((unused)) void *context)
     {
+        TsdfServer *server = (TsdfServer *)context;
+
         // validate data
         int n_packets;
         pose_vel_6dof_t *d = pipe_validate_pose_vel_6dof_t(data, bytes, &n_packets);
@@ -680,6 +676,11 @@ namespace voxblox
         {
             rc_tf_ringbuf_insert_pose(&buf, d[i]);
         }
+
+        pthread_mutex_lock(&pose_mutex);
+        server->curr_pose << d[n_packets - 1].T_child_wrt_parent[0], d[n_packets - 1].T_child_wrt_parent[1], d[n_packets - 1].T_child_wrt_parent[2];
+        pthread_mutex_unlock(&pose_mutex);
+        
         return;
     }
 
@@ -761,7 +762,7 @@ namespace voxblox
         }
 
         // VIO
-        pipe_client_set_simple_helper_cb(MPA_VVPX4_CH, _vio_helper_cb, NULL);
+        pipe_client_set_simple_helper_cb(MPA_VVPX4_CH, _vio_helper_cb, this);
         pipe_client_set_connect_cb(MPA_VVPX4_CH, _vio_connect_cb, NULL);
         pipe_client_set_disconnect_cb(MPA_VVPX4_CH, _vio_disconnect_cb, NULL);
 
@@ -824,7 +825,7 @@ namespace voxblox
         esdf_map_.reset(new EsdfMap(esdf_map_config));
         esdf_integrator_.reset(new EsdfIntegrator(esdf_int_config, tsdf_map_->getTsdfLayerPtr(), esdf_map_->getEsdfLayerPtr()));
 
-        planner_.reset(new RRTConnect(esdf_map_, RENDER_CH));
+        planner_.reset(new RRTConnect(esdf_map_, esdf_mutex, RENDER_CH));
         planner_->setup();
 
         keep_updating = true;
@@ -1216,9 +1217,7 @@ namespace voxblox
         if (en_debug)
             fprintf(stderr, "STARTING SOLVE\n");
 
-        pthread_mutex_lock(&esdf_mutex);
         bool success = planner_->createPlan(start_pose, goal_pose, *path_to_follow);
-        pthread_mutex_unlock(&esdf_mutex);
 
         return success;
     }

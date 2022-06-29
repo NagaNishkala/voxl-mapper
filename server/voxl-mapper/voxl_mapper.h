@@ -121,10 +121,7 @@ protected:
     std::string str_tsdf_save_path;
     std::string str_mesh_save_path;
 
-    /// MaiRRT
     Eigen::Vector3d curr_pose;
-    Eigen::Vector3d start_pose;
-    Eigen::Vector3d goal_pose;
 
     std::thread visual_updates_thread;
     std::atomic<bool> keep_updating;
