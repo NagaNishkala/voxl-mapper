@@ -142,7 +142,7 @@ void RRTConnect::setupSmoother()
 
 bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end, bool is_extend = false)
 {
-    timer.start("Edge Collision Check");
+    // timer.start("Edge Collision Check");
 
     double dist;
 
@@ -155,7 +155,7 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
 
     if (detectCollision(end))
     {
-        timer.stop("Edge Collision Check");
+        // timer.stop("Edge Collision Check");
         return true;
     }
 
@@ -167,13 +167,13 @@ bool RRTConnect::detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::
     {
         if (detectCollision(pos))
         {
-            timer.stop("Edge Collision Check");
+            // timer.stop("Edge Collision Check");
             return true;
         }
 
         pos += dir_vec * robot_radius;
     }
-    timer.stop("Edge Collision Check");
+    // timer.stop("Edge Collision Check");
     return false;
 }
 
@@ -231,7 +231,7 @@ Node *RRTConnect::createRandomNode()
 
 std::pair<Node *, double> RRTConnect::findNearest(const Eigen::Vector3d &point)
 {
-    timer.start("Find Nearest");
+    // timer.start("Find Nearest");
     double min_dist = DBL_MAX;
     Node *closest = nullptr;
 
@@ -273,7 +273,7 @@ std::pair<Node *, double> RRTConnect::findNearest(const Eigen::Vector3d &point)
         }
     }
 
-    timer.stop("Find Nearest");
+    // timer.stop("Find Nearest");
 
     return std::make_pair(closest, min_dist);
 }
@@ -360,7 +360,8 @@ void RRTConnect::deleteNodes(Node *root)
 
 void RRTConnect::cleanupTree()
 {
-    deleteNodes(root_);
+    if (root_)
+        deleteNodes(root_);
 
     // Clear out the search structure
     for (std::vector<Node *> &vec : nodes_)
@@ -403,6 +404,8 @@ void RRTConnect::nodesToEigen(const std::vector<Node *> &rrt_path, mav_msgs::Eig
 bool RRTConnect::locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoints, mav_msgs::EigenTrajectoryPointVector &smoothed_path, mav_trajectory_generation::Trajectory &final_trajectory)
 {
     bool got = loco_smoother_.getTrajectoryBetweenWaypoints(waypoints, &final_trajectory);
+
+    loco_smoother_.setNumSegments(waypoints.size());
 
     bool success = false;
     if (got)
@@ -659,11 +662,11 @@ bool RRTConnect::fixTree(Node *new_root)
 
 bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &end_pos, mav_trajectory_generation::Trajectory &trajectory)
 {
-    timer.start("Precompute map bounds");
+    // timer.start("Precompute map bounds");
     computeMapBounds();
-    timer.stop("Precompute map bounds");
+    // timer.stop("Precompute map bounds");
 
-    timer.start("RRT Planner");
+    // timer.start("RRT Planner");
 
     // Setup start and end nodes
     Node *q_start = createNewNode(start_pos, nullptr);
@@ -701,13 +704,13 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vecto
     if (detectCollision(q_start->position))
     {
         printf("ERROR: Start point is in collision\n");
-        timer.stopAll();
+        // timer.stopAll();
         return false;
     }
     else if (detectCollision(q_goal->position))
     {
         printf("ERROR: End point is in collision\n");
-        timer.stopAll();
+        // timer.stopAll();
         return false;
     }
 
@@ -725,7 +728,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vecto
         if (rrt_send_map)
             visualizeMap();
 
-        timer.stopAll();
+        // timer.stopAll();
         return succ;
     }
 
@@ -812,7 +815,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vecto
     else
     {
         printf("RRT solution not found. Planning exceeded %6.2fms and took %d attempts\n", rrt_max_runtime_nanoseconds / 1000000.0, attempts);
-        timer.stopAll();
+        // timer.stopAll();
         return false;
     }
 
@@ -827,18 +830,18 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vecto
     // Reverse path since we traveresed tree from leaf to root but we want root to leaf
     std::reverse(rrt_path.begin(), rrt_path.end());
 
-    timer.start("Pruning");
+    // timer.start("Pruning");
     pruneRRTPath(rrt_path);
-    timer.stop("Pruning");
+    // timer.stop("Pruning");
 
-    timer.stop("RRT Planner");
+    // timer.stop("RRT Planner");
 
     // Run smoother
-    timer.start("Smoother");
+    // timer.start("Smoother");
     bool smoother_success = runSmoother(rrt_path, trajectory);
-    timer.stop("Smoother");
+    // timer.stop("Smoother");
 
-    timer.printAllTimers();
+    // timer.printAllTimers();
 
     visualizePaths(rrt_path);
 
@@ -849,7 +852,7 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vecto
     cleanupPruning();
     cleanupTree(); // TODO: Remove once replanning is finished
 
-    timer.stopAll();
+    // timer.stopAll();
     return smoother_success;
 }
 
