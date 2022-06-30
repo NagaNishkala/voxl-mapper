@@ -60,14 +60,12 @@
 
 #define VIS_UPDATE_RATE 2
 
-pthread_mutex_t pose_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t esdf_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t tsdf_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-rc_tfv_ringbuf_t buf = RC_TF_RINGBUF_INITIALIZER;
-
 namespace voxblox
 {
+    pthread_mutex_t TsdfServer::pose_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_t TsdfServer::esdf_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_t TsdfServer::tsdf_mutex = PTHREAD_MUTEX_INITIALIZER;
+    rc_tfv_ringbuf_t TsdfServer::buf = RC_TF_RINGBUF_INITIALIZER;
 
     TsdfServer::TsdfServer(const TsdfMap::Config &config, const TsdfIntegratorBase::Config &integrator_config,
                            const MeshIntegratorConfig &mesh_config, bool debug, bool timing)
@@ -418,21 +416,14 @@ namespace voxblox
             printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
         }
 
-        // Get drones position
-        Eigen::Vector3d _curr_pose;
-        pthread_mutex_lock(&pose_mutex);
-        _curr_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
-        pthread_mutex_unlock(&pose_mutex);
-
         // clear small sphere (0.2m radius) around our drones pose in the esdf map
         start_time = server->rc_nanos_monotonic_time();
-        server->addNewRobotPositionToEsdf(_curr_pose.x(), _curr_pose.y(), _curr_pose.z());
+        server->addNewRobotPositionToEsdf(tf_body_wrt_fixed.d[0][3], tf_body_wrt_fixed.d[1][3], tf_body_wrt_fixed.d[2][3]);
         end_time = server->rc_nanos_monotonic_time();
 
         if (server->en_timing)
-        {
             printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
-        }
+
         return;
     }
 
@@ -631,15 +622,9 @@ namespace voxblox
             printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
         }
 
-        // Get drones position
-        Eigen::Vector3d _curr_pose;
-        pthread_mutex_lock(&pose_mutex);
-        _curr_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
-        pthread_mutex_unlock(&pose_mutex);
-
         // clear small sphere (0.2m radius) around our drones pose in the esdf map
         start_time = server->rc_nanos_monotonic_time();
-        server->addNewRobotPositionToEsdf(_curr_pose.x(), _curr_pose.y(), _curr_pose.z());
+        server->addNewRobotPositionToEsdf(tf_body_wrt_fixed.d[0][3], tf_body_wrt_fixed.d[1][3], tf_body_wrt_fixed.d[2][3]);
         end_time = server->rc_nanos_monotonic_time();
 
         if (server->en_timing)
@@ -660,8 +645,6 @@ namespace voxblox
 
     void TsdfServer::_vio_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, __attribute__((unused)) void *context)
     {
-        TsdfServer *server = (TsdfServer *)context;
-
         // validate data
         int n_packets;
         pose_vel_6dof_t *d = pipe_validate_pose_vel_6dof_t(data, bytes, &n_packets);
@@ -677,10 +660,6 @@ namespace voxblox
             rc_tf_ringbuf_insert_pose(&buf, d[i]);
         }
 
-        pthread_mutex_lock(&pose_mutex);
-        server->curr_pose << d[n_packets - 1].T_child_wrt_parent[0], d[n_packets - 1].T_child_wrt_parent[1], d[n_packets - 1].T_child_wrt_parent[2];
-        pthread_mutex_unlock(&pose_mutex);
-        
         return;
     }
 
@@ -825,7 +804,7 @@ namespace voxblox
         esdf_map_.reset(new EsdfMap(esdf_map_config));
         esdf_integrator_.reset(new EsdfIntegrator(esdf_int_config, tsdf_map_->getTsdfLayerPtr(), esdf_map_->getEsdfLayerPtr()));
 
-        planner_.reset(new RRTConnect(esdf_map_, esdf_mutex, RENDER_CH));
+        planner_.reset(new RRTConnect(esdf_map_, RENDER_CH));
         planner_->setup();
 
         keep_updating = true;
@@ -871,7 +850,7 @@ namespace voxblox
         static Eigen::Vector3d upper_bound;
 
         if (counter % 5 == 0)
-        { 
+        {
             // this needs to be dialed in, not sure if every 5 cmaps is good enough to regauge scale
             pthread_mutex_lock(&esdf_mutex);
             voxblox::utils::computeMapBoundsFromLayer(*esdf_map_->getEsdfLayerPtr(), &lower_bound, &upper_bound);
@@ -917,10 +896,31 @@ namespace voxblox
             cost_map_ptc.push_back(pt);
         }
 
+        // Get drones position
+        rc_tf_t tf_body_wrt_fixed = RC_TF_INITIALIZER;
+        int ret = rc_tf_ringbuf_get_tf_at_time(&buf, rc_nanos_monotonic_time(), &tf_body_wrt_fixed);
+        if (ret < 0)
+        {
+            fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
+            if (ret == -2)
+            {
+                printf("there wasn't sufficient data in the buffer\n");
+            }
+            if (ret == -3)
+            {
+                printf("the requested timestamp was too new\n");
+            }
+            if (ret == -4)
+            {
+                printf("the requested timestamp was too old\n");
+            }
+            return;
+        }
+
         point_xyz_i pt_;
         pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-        pt_.x = curr_pose.x();
-        pt_.y = curr_pose.y();
+        pt_.x = tf_body_wrt_fixed.d[0][3];
+        pt_.y = tf_body_wrt_fixed.d[1][3];
         pthread_mutex_unlock(&pose_mutex); // return mutex lock
         pt_.z = voxel_size;                // same as above pt.z
         pt_.intensity = 0;
@@ -1043,9 +1043,28 @@ namespace voxblox
             printf("Client requested plan home.\n");
             Eigen::Vector3d start_pose, goal_pose;
 
-            pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-            start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
-            pthread_mutex_unlock(&pose_mutex); // return mutex lock
+            // Get drones position
+            rc_tf_t tf_body_wrt_fixed = RC_TF_INITIALIZER;
+            int ret = rc_tf_ringbuf_get_tf_at_time(&buf, server->rc_nanos_monotonic_time(), &tf_body_wrt_fixed);
+            if (ret < 0)
+            {
+                fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
+                if (ret == -2)
+                {
+                    printf("there wasn't sufficient data in the buffer\n");
+                }
+                if (ret == -3)
+                {
+                    printf("the requested timestamp was too new\n");
+                }
+                if (ret == -4)
+                {
+                    printf("the requested timestamp was too old\n");
+                }
+                return;
+            }
+
+            start_pose << tf_body_wrt_fixed.d[0][3], tf_body_wrt_fixed.d[1][3], tf_body_wrt_fixed.d[2][3];
 
             goal_pose << 0.0, 0.0, -1.5;
 
@@ -1159,9 +1178,28 @@ namespace voxblox
 
             Eigen::Vector3d start_pose, goal_pose;
 
-            pthread_mutex_lock(&pose_mutex); // lock pose mutex, get last fully integrated pose
-            start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
-            pthread_mutex_unlock(&pose_mutex); // return mutex lock
+            // Get drones position
+            rc_tf_t tf_body_wrt_fixed = RC_TF_INITIALIZER;
+            int ret = rc_tf_ringbuf_get_tf_at_time(&buf, server->rc_nanos_monotonic_time(), &tf_body_wrt_fixed);
+            if (ret < 0)
+            {
+                fprintf(stderr, "ERROR fetching tf from tf ringbuffer\n");
+                if (ret == -2)
+                {
+                    printf("there wasn't sufficient data in the buffer\n");
+                }
+                if (ret == -3)
+                {
+                    printf("the requested timestamp was too new\n");
+                }
+                if (ret == -4)
+                {
+                    printf("the requested timestamp was too old\n");
+                }
+                return;
+            }
+
+            start_pose << tf_body_wrt_fixed.d[0][3], tf_body_wrt_fixed.d[1][3], tf_body_wrt_fixed.d[2][3];
 
             char *goal_ptr;
             goal_ptr = strtok(string, ":");
@@ -1217,7 +1255,9 @@ namespace voxblox
         if (en_debug)
             fprintf(stderr, "STARTING SOLVE\n");
 
+        pthread_mutex_lock(&esdf_mutex);
         bool success = planner_->createPlan(start_pose, goal_pose, *path_to_follow);
+        pthread_mutex_unlock(&esdf_mutex);
 
         return success;
     }
@@ -1279,7 +1319,6 @@ namespace voxblox
         pthread_mutex_lock(&tsdf_mutex);
         bool tsdf_saved = tsdf_map_->getTsdfLayer().saveToFile(tsdf_path, true);
         pthread_mutex_unlock(&tsdf_mutex);
-
 
         pthread_mutex_lock(&esdf_mutex);
         bool esdf_saved = esdf_map_->getEsdfLayer().saveToFile(esdf_path, true);

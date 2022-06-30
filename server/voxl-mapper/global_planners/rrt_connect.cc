@@ -12,9 +12,8 @@ static uint64_t rc_nanos_monotonic_time()
     return ((uint64_t)ts.tv_sec * 1000000000) + ts.tv_nsec;
 }
 
-RRTConnect::RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map, pthread_mutex_t &map_mutex, int vis_channel)
+RRTConnect::RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map, int vis_channel)
     : esdf_map_(esdf_map),
-      map_mutex_(map_mutex),
       root_(nullptr),
       node_counter_(-2), // Set to -2 so that -2 is start and -1 is goal
       vis_channel_(vis_channel)
@@ -663,8 +662,6 @@ bool RRTConnect::fixTree(Node *new_root)
 
 bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &end_pos, mav_trajectory_generation::Trajectory &trajectory)
 {
-    pthread_mutex_lock(&map_mutex_);
-
     // timer.start("Precompute map bounds");
     computeMapBounds();
     // timer.stop("Precompute map bounds");
@@ -856,7 +853,6 @@ bool RRTConnect::createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vecto
     cleanupTree(); // TODO: Remove once replanning is finished
 
     // timer.stopAll();
-    pthread_mutex_unlock(&map_mutex_);
     return smoother_success;
 }
 

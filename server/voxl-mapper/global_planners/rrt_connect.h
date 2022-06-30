@@ -26,7 +26,7 @@ class RRTConnect : public GlobalPlanner
 {
 
 public:
-    RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map, pthread_mutex_t &map_mutex, int vis_channel);
+    RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map, int vis_channel);
 
     bool createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &end_pos, mav_trajectory_generation::Trajectory &trajectory);
 
@@ -220,7 +220,6 @@ private:
     }
 
     std::shared_ptr<voxblox::EsdfMap> esdf_map_;
-    pthread_mutex_t map_mutex_;
     Eigen::Vector3d lower_bound_;
     Eigen::Vector3d upper_bound_;
     int d_x_, d_y_, d_z_;
