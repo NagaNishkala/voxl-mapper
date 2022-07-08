@@ -131,7 +131,7 @@ bool PolynomialSmoother::getTrajectoryBetweenWaypoints(
         break;
       }
     }
-    printf("[SPLIT SMOOTHING] Added %d additional vertices.\n", num_added);
+    // printf("[SPLIT SMOOTHING] Added %d additional vertices.\n", num_added);
 
     // If we had to do this, let's scale the times back to make sure we're
     // still within constraints.
