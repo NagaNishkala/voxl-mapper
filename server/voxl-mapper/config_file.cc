@@ -110,7 +110,7 @@ rc_tf_t tf_depth3_wrt_body;
 char extrinsics3_name[BUF_LEN];
 float depth3_rate;
 
-double robot_radius;
+float robot_radius;
 float voxel_size;
 int voxels_per_side;
 char esdf_save_path[BUF_LEN];
@@ -123,7 +123,7 @@ float esdf_default_distance;
 float esdf_inner_sphere_radius;
 float esdf_outer_sphere_radius;
 
-double rrt_min_distance;
+float rrt_min_distance;
 double rrt_max_runtime_nanoseconds;
 double rrt_goal_threshold;
 int rrt_prune_iterations;
@@ -374,7 +374,7 @@ int config_file_read(void)
 	json_fetch_string_with_default(parent, "extrinsics3_name", extrinsics3_name, BUF_LEN, "stereo_l");
 	json_fetch_float_with_default(parent, "depth3_rate", &depth3_rate, 10.0);
 
-	json_fetch_double_with_default(parent, "robot_radius", &robot_radius, 0.3);
+	json_fetch_float_with_default(parent, "robot_radius", &robot_radius, 0.3);
 	json_fetch_float_with_default(parent, "voxel_size", &voxel_size, 0.2);
     json_fetch_int_with_default(parent, "voxels_per_side", &voxels_per_side, 16u);
 	json_fetch_string_with_default(parent, "esdf_save_path", esdf_save_path, BUF_LEN, "/data/voxl-mapper/esdf_map");
@@ -387,7 +387,7 @@ int config_file_read(void)
 	json_fetch_float_with_default(parent, "esdf_inner_sphere_radius", &esdf_inner_sphere_radius, 0.2);
 	json_fetch_float_with_default(parent, "esdf_outer_sphere_radius", &esdf_outer_sphere_radius, 0.6);
 
-	json_fetch_double_with_default(parent, "rrt_min_distance", &rrt_min_distance, 0.2);
+	json_fetch_float_with_default(parent, "rrt_min_distance", &rrt_min_distance, 0.2);
 	json_fetch_double_with_default(parent, "rrt_max_runtime_nanoseconds", &rrt_max_runtime_nanoseconds, 1000000000);
 	json_fetch_double_with_default(parent, "rrt_goal_threshold", &rrt_goal_threshold, 0.05);
 	json_fetch_int_with_default(parent, "rrt_prune_iterations", &rrt_prune_iterations, 100);

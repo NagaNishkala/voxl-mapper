@@ -75,7 +75,7 @@ extern float depth3_rate;
 
 
 // *ALL DISTANCES/SIZES ARE IN METERS* //
-extern double robot_radius;
+extern float robot_radius;
 extern float voxel_size;
 extern int voxels_per_side;
 extern char esdf_save_path[BUF_LEN];
@@ -88,7 +88,7 @@ extern float esdf_default_distance;
 extern float esdf_inner_sphere_radius;
 extern float esdf_outer_sphere_radius;
 
-extern double rrt_min_distance;
+extern float rrt_min_distance;
 extern double rrt_max_runtime_nanoseconds;
 extern double rrt_goal_threshold;
 extern int rrt_prune_iterations;
