@@ -5,6 +5,7 @@ add_executable(${TARGET} ${all_src_files})
 
 target_include_directories(${TARGET} PUBLIC
     ./
+    /usr/include/voxl_trajectory
 )
 
 target_link_libraries(${TARGET}

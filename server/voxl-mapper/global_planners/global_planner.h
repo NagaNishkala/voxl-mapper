@@ -1,7 +1,7 @@
 #ifndef GLOBAL_PLANNER_H
 #define GLOBAL_PLANNER_H
 
-#include <mav_trajectory_generation/trajectory.h>
+#include "planner_utils.h"
 
 /**
  * @brief Base class for global planners to adhere to
@@ -31,9 +31,9 @@ public:
      * @return true If a path was found
      * @return false If no path was found
      */
-    virtual bool createPlan(const Eigen::Vector3d &start_pos,
-                            const Eigen::Vector3d &end_pos,
-                            mav_trajectory_generation::Trajectory &trajectory) = 0;
+    virtual bool createPlan(const Point3f &start_pos,
+                            const Point3f &end_pos,
+                            Point3fVector &waypoints) = 0;
 
     virtual ~GlobalPlanner() {};
 };

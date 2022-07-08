@@ -6,17 +6,15 @@
 #include <memory>
 #include <voxblox/utils/planning_utils.h>
 #include <voxblox/core/esdf_map.h>
-#include <mav_path_smoothing/loco_smoother.h>
 #include <modal_pipe.h>
 #include <modal_pipe_interfaces.h>
-#include <ptcloud_vis.h>
 #include <pthread.h>
 
 #include "timer.h"
 
 struct Node
 {
-    Eigen::Vector3d position;
+    Point3f position;
     Node *parent;
     std::vector<Node *> children;
     int id;
@@ -28,11 +26,18 @@ class RRTConnect : public GlobalPlanner
 public:
     RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map, int vis_channel);
 
-    bool createPlan(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &end_pos, mav_trajectory_generation::Trajectory &trajectory);
+    bool createPlan(const Point3f &start_pos, const Point3f &end_pos, Point3fVector &waypoints);
 
     void tearDown();
 
 private:
+
+    bool runRRT(const Point3f &start_pos, const Point3f &end_pos, Point3fVector &waypoints);
+
+    bool isPlanningFeasible(const Point3f &start_pos, const Point3f &end_pos);
+
+    bool checkImmediatePath(const Point3f &start_pos, const Point3f &end_pos);
+
     /**
      * @brief Computes the map bounds and initializes the map variables
      * 
@@ -40,12 +45,6 @@ private:
      * @return false ESDF map does not exist
      */
     bool computeMapBounds();
-
-    /**
-     * @brief Sets the loco smoother parameters
-     * 
-     */
-    void setupSmoother();
 
     /**
      * @brief Detects if a collision occurs along an edge (includes start and end point in checks)
@@ -56,7 +55,7 @@ private:
      * @return true a collision was found along edge from start to end
      * @return false no collision found along edge from start to end
      */
-    bool detectCollisionEdge(const Eigen::Vector3d &start, const Eigen::Vector3d &end, bool is_extend);
+    bool detectCollisionEdge(const Point3f &start, const Point3f &end, bool is_extend);
 
     /**
      * @brief Detects if the robot would be in collision at pos
@@ -65,24 +64,24 @@ private:
      * @return true robot is in collision at pos
      * @return false robot not in collision as pos
      */
-    bool detectCollision(const Eigen::Vector3d &pos);
+    bool detectCollision(const Point3f &pos);
 
     /**
      * @brief Get the distance to the closest obstacle at position
      * 
      * @param position position to check distance to obstalce for
-     * @return double distance to nearest obstacle
+     * @return float distance to nearest obstacle
      */
-    double getMapDistance(const Eigen::Vector3d &position);\
+    float getMapDistance(const Point3f &position);\
 
     /**
      * @brief Get the distance and gradient of the closest obstacle at position
      * 
      * @param position position to check distance/gradient to obstalce for
      * @param gradient [output] gradient vector
-     * @return double distance to nearest obstacle
+     * @return float distance to nearest obstacle
      */
-    double getMapDistanceAndGradient(const Eigen::Vector3d& position, Eigen::Vector3d* gradient);
+    float getMapDistanceAndGradient(const Point3f& position, Point3f* gradient);
 
     /**
      * @brief Helper function to create a new node
@@ -91,7 +90,7 @@ private:
      * @param parent parent of node
      * @return Node* newly created node
      */
-    Node *createNewNode(const Eigen::Vector3d& position, Node* parent);
+    Node *createNewNode(const Point3f& position, Node* parent);
 
     /**
      * @brief Creates a new node at a random location inside map bounds
@@ -106,7 +105,7 @@ private:
      * @param point position to find the nearest node to
      * @return std::pair<Node *, double> the nearest node and distance to node
      */
-    std::pair<Node *, double> findNearest(const Eigen::Vector3d &point);
+    std::pair<Node *, double> findNearest(const Point3f &point);
 
     /**
      * @brief Calculates corresponding bin of the node at index in nodes_.
@@ -123,7 +122,7 @@ private:
      * @param point point to convert
      * @return int bin index in nodes_
      */
-    int flatIndexfromPoint(const Eigen::Vector3d &point);
+    int flatIndexfromPoint(const Point3f &point);
 
     /**
      * @brief Add a node to the RRT tree
@@ -149,33 +148,6 @@ private:
     bool fixTree(Node* new_root);
 
     /**
-     * @brief Convert the rrt path to the appropriate eigen type for the smoother to process
-     * 
-     * @param eigen_path [output] path to be fed to smoother
-     */
-    void nodesToEigen(const std::vector<Node*> &rrt_path, mav_msgs::EigenTrajectoryPointVector &eigen_path);
-
-    /**
-     * @brief Runs the loco smoother on the path returned from RRT
-     * 
-     * @param waypoints points found by RRT planner
-     * @param smoothed_path [output] points sampled along the smoothed path
-     * @param final_trajectory [output] smoothed final trajectory
-     * @return true smoother ran succesfully
-     * @return false smoother failed
-     */
-    bool locoSmooth(const mav_msgs::EigenTrajectoryPointVector &waypoints, mav_msgs::EigenTrajectoryPointVector &smoothed_path, mav_trajectory_generation::Trajectory &final_trajectory);
-
-    /**
-     * @brief Handles preprocessing needed for running loco smoother
-     * 
-     * @param trajectory [output] smoothed final trajectory
-     * @return true smoother ran succesfully
-     * @return false smoother failed
-     */
-    bool runSmoother(const std::vector<Node*> &rrt_path, mav_trajectory_generation::Trajectory &trajectory);
-
-    /**
      * @brief Prunes the found RRT path in two levels.
      * 
      * Level 1: Pick two random edges and two random points along those edges.
@@ -195,6 +167,8 @@ private:
      */
     void pruneRRTPath(std::vector<Node*> &rrt_path);
 
+    void convertPathToOutput(const std::vector<Node*> &rrt_path, Point3fVector &waypoints);
+
     /**
      * @brief Deletes intermediate nodes created by Level 1 pruning
      * 
@@ -205,35 +179,26 @@ private:
      * @brief Sends both RRT and smoothed trajectory path points to voxl-portal
      * 
      */
-    void visualizePaths(const std::vector<Node*> &rrt_path);
+    void visualizePath(const Point3fVector &waypoints);
 
-    /**
-     * @brief Sends ESDF data to voxl-portal to allow for visualizing of the map
-     * 
-     */
-    void visualizeMap();
-
-    inline double distance(const Eigen::Vector3d &start, const Eigen::Vector3d &end)
+    inline double distance(const Eigen::Vector3f &start, const Eigen::Vector3f &end)
     {
-        Eigen::Vector3d dif = end - start;
+        Point3f dif = end - start;
         return dif.norm();
     }
 
     std::shared_ptr<voxblox::EsdfMap> esdf_map_;
-    Eigen::Vector3d lower_bound_;
-    Eigen::Vector3d upper_bound_;
+    Point3f lower_bound_;
+    Point3f upper_bound_;
     int d_x_, d_y_, d_z_;
     double ind_lower_[3];
 
     std::vector<std::vector<Node *>> nodes_;
     std::vector<Node *> pruning_nodes_;
-    mav_msgs::EigenTrajectoryPointVector smoothed_path_;
     Node *root_;
     int node_counter_;
 
     int vis_channel_;
-
-    mav_planning::LocoSmoother loco_smoother_;
 
     Timer timer;
 };
