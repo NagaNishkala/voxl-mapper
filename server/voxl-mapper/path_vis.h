@@ -56,6 +56,7 @@ inline void generateAndSendPath(int ch, std::vector<path_vis_t> points, uint32_t
     memcpy((char *)data + header_size, points.data(), data_size);
 
     pipe_server_write(ch, data, total_size);
+    free(data);
 }
 
 #endif
