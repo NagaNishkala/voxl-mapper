@@ -55,69 +55,6 @@ bool RRTConnect::computeMapBounds()
     return true;
 }
 
-bool RRTConnect::detectCollisionEdge(const Point3f &start, const Point3f &end, bool is_extend = false)
-{
-    float dist;
-
-    if (is_extend)
-        dist = rrt_min_distance;
-    else
-        dist = distance(start, end);
-
-    int num_of_steps = floor(dist / robot_radius);
-
-    if (detectCollision(end))
-    {
-        return true;
-    }
-
-    // A direction vector with length of robot radius
-    Point3f dir_vec = ((end - start) / dist);
-    Point3f pos = start + dir_vec * robot_radius;
-
-    for (int i = 0; i < num_of_steps; i++)
-    {
-        if (detectCollision(pos))
-        {
-            return true;
-        }
-
-        pos += dir_vec * robot_radius;
-    }
-
-    return false;
-}
-
-bool RRTConnect::detectCollision(const Point3f &pos)
-{
-    return getMapDistance(pos) <= robot_radius;
-}
-
-float RRTConnect::getMapDistance(const Point3f &position)
-{
-    float dist = 0.0;
-    if (!(esdf_map_->getDistanceAtPosition(position, false, &dist)))
-    {
-        // if we cannot identify a voxel close enough to this location WITHOUT interpolation, it is unknown so reject it
-        if (rrt_treat_unknown_as_occupied)
-            dist = 0.0;
-        else
-            dist = esdf_default_distance;
-    }
-
-    return dist;
-}
-
-float RRTConnect::getMapDistanceAndGradient(const Point3f &position, Point3f *gradient)
-{
-    float distance = 0.0;
-    if (!(esdf_map_->getDistanceAndGradientAtPosition(position, false, &distance, gradient)))
-    {
-        return 0.0;
-    }
-    return distance;
-}
-
 Node *RRTConnect::createNewNode(const Point3f &position, Node *parent)
 {
     Node *new_node = new Node{.position = position, .parent = parent, .children = std::vector<Node *>(), .id = node_counter_};
@@ -328,7 +265,7 @@ void RRTConnect::pruneRRTPath(std::vector<Node *> &rrt_path)
 
         // The path between the two new positions is a shortcut. If its collision free,
         // add it into the path and remove the nodes that it skips
-        if (!detectCollisionEdge(candidate_a, candidate_b))
+        if (!detectCollisionEdge(esdf_map_.get(), candidate_a, candidate_b))
         {
             // Remove all intermediate nodes in rrt_path between A and B
             while (index_b > index_a)
@@ -364,7 +301,7 @@ void RRTConnect::pruneRRTPath(std::vector<Node *> &rrt_path)
         {
             end = rrt_path[j];
 
-            if (!detectCollisionEdge(start->position, end->position))
+            if (!detectCollisionEdge(esdf_map_.get(), start->position, end->position))
             {
                 rrt_path.erase(rrt_path.begin() + i + 1, rrt_path.begin() + j);
                 prune_count_l2++;
@@ -415,7 +352,7 @@ bool RRTConnect::fixTree(Node *new_root)
     std::tie(nearest_node, dist) = findNearest(new_root->position);
 
     // Need to make sure the nearest node is reachable
-    if (detectCollisionEdge(nearest_node->position, new_root->position))
+    if (detectCollisionEdge(esdf_map_.get(), nearest_node->position, new_root->position))
         return false;
 
     add(nearest_node, new_root);
@@ -519,7 +456,7 @@ bool RRTConnect::runRRT(const Point3f &start_pos, const Point3f &end_pos, Point3
         {
             q_connect = createNewNode(q_near->position + rrt_min_distance * dir_vec, nullptr);
 
-            if (!detectCollisionEdge(q_near->position, q_connect->position, true))
+            if (!detectCollisionEdge(esdf_map_.get(), q_near->position, q_connect->position, true))
             {
                 add(q_near, q_connect);
                 q_near = q_connect;
@@ -535,7 +472,7 @@ bool RRTConnect::runRRT(const Point3f &start_pos, const Point3f &end_pos, Point3
         }
 
         // Add q_rand only if the while loop succesfully finished and its collision free
-        if (!collision_found && !detectCollisionEdge(q_near->position, q_rand->position))
+        if (!collision_found && !detectCollisionEdge(esdf_map_.get(), q_near->position, q_rand->position))
         {
             add(q_near, q_rand);
 
@@ -596,12 +533,12 @@ bool RRTConnect::runRRT(const Point3f &start_pos, const Point3f &end_pos, Point3
 
 bool RRTConnect::isPlanningFeasible(const Point3f &start_pos, const Point3f &end_pos)
 {
-    if (detectCollision(start_pos))
+    if (detectCollision(esdf_map_.get(), start_pos))
     {
         printf("ERROR: Start point is in collision\n");
         return false;
     }
-    else if (detectCollision(end_pos))
+    else if (detectCollision(esdf_map_.get(), end_pos))
     {
         printf("ERROR: End point is in collision\n");
         return false;
@@ -612,7 +549,7 @@ bool RRTConnect::isPlanningFeasible(const Point3f &start_pos, const Point3f &end
 
 bool RRTConnect::checkImmediatePath(const Point3f &start_pos, const Point3f &end_pos)
 {
-    if (!detectCollisionEdge(start_pos, end_pos))
+    if (!detectCollisionEdge(esdf_map_.get(), start_pos, end_pos))
     {
         printf("Immediate collision free path found!\n");
         return true;

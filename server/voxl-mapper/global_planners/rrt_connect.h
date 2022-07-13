@@ -47,43 +47,6 @@ private:
     bool computeMapBounds();
 
     /**
-     * @brief Detects if a collision occurs along an edge (includes start and end point in checks)
-     * 
-     * @param start the start point of the edge
-     * @param end the end point of the edge
-     * @param is_extend if the edge is computed as part of the Extend portion of RRT
-     * @return true a collision was found along edge from start to end
-     * @return false no collision found along edge from start to end
-     */
-    bool detectCollisionEdge(const Point3f &start, const Point3f &end, bool is_extend);
-
-    /**
-     * @brief Detects if the robot would be in collision at pos
-     * 
-     * @param pos the position to check for colission
-     * @return true robot is in collision at pos
-     * @return false robot not in collision as pos
-     */
-    bool detectCollision(const Point3f &pos);
-
-    /**
-     * @brief Get the distance to the closest obstacle at position
-     * 
-     * @param position position to check distance to obstalce for
-     * @return float distance to nearest obstacle
-     */
-    float getMapDistance(const Point3f &position);\
-
-    /**
-     * @brief Get the distance and gradient of the closest obstacle at position
-     * 
-     * @param position position to check distance/gradient to obstalce for
-     * @param gradient [output] gradient vector
-     * @return float distance to nearest obstacle
-     */
-    float getMapDistanceAndGradient(const Point3f& position, Point3f* gradient);
-
-    /**
      * @brief Helper function to create a new node
      * 
      * @param position 3D point of node
