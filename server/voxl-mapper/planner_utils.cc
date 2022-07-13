@@ -1,7 +1,7 @@
 #include "planner_utils.h"
 #include "config_file.h"
 
-void setupSmootherFromConfig(mav_planning::LocoSmoother &loco_smoother)
+void setupSmootherFromConfig(mav_planning::LocoSmoother &loco_smoother, const voxblox::EsdfMap *map)
 {
     /** These are mainly used in the nonlinear smoothing:
      *
@@ -60,8 +60,8 @@ void setupSmootherFromConfig(mav_planning::LocoSmoother &loco_smoother)
 
     // Set parameters and callbacks
     loco_smoother.setParameters(loco_params, poly_params, physical_constraints, loco_verbose);
-    // loco_smoother.setInCollisionCallback(std::bind(&RRTConnect::detectCollision, this, std::placeholders::_1));
-    // loco_smoother.setDistanceAndGradientFunction(std::bind(&RRTConnect::getMapDistanceAndGradient, this, std::placeholders::_1, std::placeholders::_2));
+    loco_smoother.setInCollisionCallback(std::bind(&smootherCollisionCallback, map, std::placeholders::_1));
+    loco_smoother.setDistanceAndGradientFunction(std::bind(&smootherDistanceGradientCallback, map, std::placeholders::_1, std::placeholders::_2));
 
     /**
      * These are only used in the nonlinear solver
@@ -76,7 +76,7 @@ void setupSmootherFromConfig(mav_planning::LocoSmoother &loco_smoother)
      * map_resolution:               Resolution of map
      * verbose:                      Whether to print debug statements or not
      */
-    loco_smoother.loco_config.epsilon = 1.0;
+    loco_smoother.loco_config.epsilon = 0.5;
     loco_smoother.loco_config.robot_radius = robot_radius;
     loco_smoother.loco_config.w_d = loco_smoothness_cost_weight;
     loco_smoother.loco_config.w_c = loco_collision_cost_weight;
@@ -131,4 +131,77 @@ bool convertMavTrajectoryToVoxlTrajectory(const mav_trajectory_generation::Traje
     }
 
     return true;
+}
+
+float getMapDistance(const voxblox::EsdfMap *map, const Point3f &position)
+{
+    float dist = 0.0;
+    if (!(map->getDistanceAtPosition(position, false, &dist)))
+    {
+        // if we cannot identify a voxel close enough to this location WITHOUT interpolation, it is unknown so reject it
+        if (rrt_treat_unknown_as_occupied)
+            dist = 0.0;
+        else
+            dist = esdf_default_distance;
+    }
+
+    return dist;
+}
+
+double smootherDistanceGradientCallback(const voxblox::EsdfMap *map, const Point3d &position, Point3d *gradient)
+{
+    double distance = 0.0;
+    if (!(map->getDistanceAndGradientAtPosition(position, false, &distance, gradient)))
+    {
+        return 0.0;
+    }
+    return distance;
+}
+
+bool smootherCollisionCallback(const voxblox::EsdfMap *map, const Point3d &pos)
+{
+    return getMapDistance(map, pos.cast<float>()) <= robot_radius;
+}
+
+bool detectCollision(const voxblox::EsdfMap *map, const Point3f &pos)
+{
+    return getMapDistance(map, pos) <= robot_radius;
+}
+
+bool detectCollisionEdge(const voxblox::EsdfMap *map, const Point3f &start, const Point3f &end, float step_size)
+{
+    float dist;
+
+    // Useful if we have precomputed distance already as part of some previous calculation
+    if (step_size < 0)
+        dist = (start - end).norm();
+    else
+        dist = step_size;
+
+    int num_of_steps = floor(dist / robot_radius);
+
+    // If end is in collision dont bother
+    if (detectCollision(map, end))
+    {
+        return true;
+    }
+
+    // A direction vector with length of robot radius
+    Point3f dir_vec = ((end - start) / dist) * robot_radius;
+    Point3f pos = start + dir_vec;
+
+    // Step towards goal and check collision
+    // (Theoretically we should be able to step by the returned distance in the map
+    // but the map is not accurate enough to allow for that)
+    for (int i = 0; i < num_of_steps; i++)
+    {
+        if (detectCollision(map, pos))
+        {
+            return true;
+        }
+
+        pos += dir_vec;
+    }
+
+    return false;
 }
