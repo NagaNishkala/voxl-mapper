@@ -1,7 +1,7 @@
 #include "voxl_planner.h"
 #include <modal_pipe.h>
 #include "global_planners/rrt_connect.h"
-#include "local_planners/simple_follower.h"
+#include "local_planners/local_a_star.h"
 #include "voxl_mapper.h"
 #include "timing_utils.h"
 #include "voxl_trajectory.h"
@@ -21,6 +21,8 @@
 #define FOLLOW_PATH "follow_path"
 #define STOP_FOLLOWING "stop_following"
 #define CONTROL_COMMANDS (PLAN_HOME "," PLAN_TO "," FOLLOW_PATH "," STOP_FOLLOWING)
+
+#include "unistd.h"
 
 void VoxlPlanner::initMPA()
 {
@@ -61,7 +63,7 @@ void VoxlPlanner::setMap(voxblox::TsdfServer *mapper)
     mapper_.reset(mapper);
 
     setGlobalPlanner(new RRTConnect(mapper->getEsdfMapPtr(), render_ch_));
-    setLocalPlanner(new SimpleFollower(mapper->getEsdfMapPtr(), plan_ch_, render_ch_));
+    setLocalPlanner(new LocalAStar(mapper, plan_ch_, render_ch_));
 }
 
 void VoxlPlanner::setGlobalPlanner(GlobalPlanner *global_planner)
@@ -180,6 +182,7 @@ void VoxlPlanner::handlePlanCmd(char *msg, VoxlPlanner *planner)
 
         mapper->addNewRobotPositionToEsdf(start_pose.x(), start_pose.y(), start_pose.z());
         mapper->updateEsdf(true);
+        usleep(100000);
 
         fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
         fprintf(stderr, "Using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
