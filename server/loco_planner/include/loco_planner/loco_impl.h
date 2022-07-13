@@ -363,8 +363,6 @@ namespace loco_planner
     // options modified by mai, see here: http://ceres-solver.org/gradient_solver.html
     ceres::GradientProblemSolver::Options options;
     options.line_search_direction_type = ceres::BFGS;
-  options.line_search_direction_type = ceres::BFGS; 
-    options.line_search_direction_type = ceres::BFGS;
     options.logging_type = ceres::SILENT;
     options.minimizer_progress_to_stdout = false;
     options.line_search_interpolation_type = ceres::BISECTION; // CUBIC or QUADRATIC or BISECTION(default)
