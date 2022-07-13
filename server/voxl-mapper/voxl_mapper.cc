@@ -888,6 +888,8 @@ namespace voxblox
 
     void TsdfServer::visual_updates_thread_worker()
     {
+        int64_t next_time = 0;
+
         while (keep_updating)
         {
             updateMesh();
@@ -899,8 +901,7 @@ namespace voxblox
             updateEsdf(true);
             publish2DCostmap();
 
-            // update at most every two seconds for now
-            loop_sleep(VIS_UPDATE_RATE);
+            loop_sleep(VIS_UPDATE_RATE, &next_time);
         }
     }
 
