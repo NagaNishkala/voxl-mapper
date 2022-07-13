@@ -62,8 +62,8 @@ public:
 
 protected:
     pthread_mutex_t segment_mutex = PTHREAD_MUTEX_INITIALIZER;
-    int cur_segment_id_;
-    double cur_segment_t_;
+    int cur_segment_id_ = 0;
+    double cur_segment_t_ = 0;
 
 };
 
