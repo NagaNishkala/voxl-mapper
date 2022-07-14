@@ -31,6 +31,7 @@ private:
         voxblox::GlobalIndex esdf_idx;
         Node *parent;
         bool closed;
+        int steps;
         int idx_in_parent = 0;
 
         bool operator<(const Node &b)
@@ -46,6 +47,10 @@ private:
               parent(parent),
               closed(false)
         {
+            if(parent)
+                steps = parent->steps + 1;
+            else
+                steps = 0;
         }
     } Node;
 

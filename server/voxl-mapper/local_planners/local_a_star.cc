@@ -15,9 +15,9 @@
 
 #define LOCAL_PLANNER_RATE 5
 #define REACHED_DISTANCE 0.05f
-#define MAX_TRAVEL_COST 10
-#define PLAN_AHEAD_TIME 0.25
-#define MAX_PLAN_DISTANCE 2
+#define MAX_STEPS 20
+#define PLAN_AHEAD_TIME 0.5
+#define MAX_PLAN_DISTANCE 1.5
 
 #define PLAN_NAME "plan_msgs"
 #define PLAN_LOCATION (MODAL_PIPE_DEFAULT_BASE_DIR PLAN_NAME "/")
@@ -148,9 +148,6 @@ bool LocalAStar::runSmoother(const Point3fVector &target_points, mav_trajectory_
 
     int num_segments = loco_num_segments < target_points.size() ? loco_num_segments : target_points.size();
     loco_smoother_.setNumSegments(num_segments);
-
-    fprintf(stderr, "segs = %d | waypoints = %d\n", num_segments, waypoints_for_smoother.size());
-    fprintf(stderr, "start_vel = (%f, %f, %f) | start_acc = (%f, %f, %f)\n", start_vel.x(), start_vel.y(), start_vel.z(), start_acc.x(), start_acc.y(), start_acc.z());
 
     return loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory);
 }
@@ -364,7 +361,8 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     const voxblox::Layer<voxblox::EsdfVoxel> *layer = map_->getEsdfMapPtr()->getEsdfLayerConstPtr();
 
     // Get goal point
-    Point3f goal_pos = computeGoalPoint(start_pos);
+    // Point3f goal_pos = computeGoalPoint(start_pos);
+    Point3f goal_pos = waypoints_.back();
 
     // Calculate start and goal idx
     voxblox::GlobalIndex start_idx = voxblox::getGridIndexFromPoint<voxblox::GlobalIndex>(start_pos, 1.0f / voxel_size);
@@ -381,7 +379,7 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     // Insert node into our lookup map
     node_lookup.insert(std::make_pair(start_node->esdf_idx, start_node));
 
-    // int64_t s = rc_nanos_monotonic_time();
+    int64_t s = rc_nanos_monotonic_time();
     int iteration_count = 0;
 
     open.push(start_node);
@@ -406,11 +404,13 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
         // Check if we have reached end condition (reached global goal or max distance away from start point)
         if (cur_node->esdf_idx == goal_idx)
         {
+            printf("Reached target\n");
             best_node = cur_node;
             break;
         }
-        else if (cur_node->travel_cost >= MAX_TRAVEL_COST)
+        else if (cur_node->steps >= MAX_STEPS)
         {
+            best_node = cur_node;
             break;
         }
 
@@ -425,16 +425,39 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
             const voxblox::GlobalIndex &nbr_global_idx = neighbor_indices.col(idx);
             const voxblox::EsdfVoxel *esdf_voxel = layer->getVoxelPtrByGlobalIndex(nbr_global_idx);
 
-
             // Skip if no voxel, or voxel has been seen and is in collision
             if (esdf_voxel == nullptr || (esdf_voxel->observed && esdf_voxel->distance < robot_radius))
             {
                 continue;
             }
 
+            Point3f nbr_pos = voxblox::getCenterPointFromGridIndex(nbr_global_idx, voxel_size);
+            float dist_to_global_path = (waypoints_.back() - nbr_pos).norm();
+            for (size_t i = cur_waypoint_; i < waypoints_.size() - 1; i++)
+            {
+                Point3f p1 = waypoints_[i];
+                Point3f p2 = waypoints_[i + 1];
+                Eigen::ParametrizedLine<float, 3> line = Eigen::ParametrizedLine<float, 3>::Through(p1, p2);
+
+                // Check if the projection of start pose is within the bounds of the line
+                if (isBetween(p1, p2, line.projection(nbr_pos)))
+                {
+                    // Save the end of the line we are closest to as our target
+                    float d = line.squaredDistance(nbr_pos);
+                    if (d < dist_to_global_path)
+                        dist_to_global_path = d;
+                }
+                else
+                {
+                    float d = fmin((nbr_pos - p1).norm(), (nbr_pos - p2).norm());
+                    if (d < dist_to_global_path)
+                        dist_to_global_path = d;
+                }
+            }
+
             float change_dir_cost = cur_node->idx_in_parent == idx ? 0 : 1;
             float travel_cost = cur_node->travel_cost + voxblox::Neighborhood<voxblox::Connectivity::kTwentySix>::kDistances[idx];
-            travel_cost += change_dir_cost;
+            travel_cost += change_dir_cost + 10 * dist_to_global_path;
 
             // If nbr is in node_lookup fetch the pointer, otherwise create a new node
             if (node_lookup.count(nbr_global_idx) > 0)
@@ -454,6 +477,7 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
                     nbr_node->total_cost = travel_cost + nbr_node->heuristic_cost;
                     nbr_node->parent = cur_node;
                     nbr_node->idx_in_parent = idx;
+                    nbr_node->steps = cur_node->steps + 1;
 
                     // Hack to reorder heap
                     // TODO: Check if remove then insert is faster
@@ -501,12 +525,20 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     }
 
     // Don't want centre of voxels for our start and end points
-    target_points[0] = start_pos;
-    target_points.back() = goal_pos;
+    target_points.front() = start_pos;
+
+    if (path.back()->esdf_idx == goal_idx)
+    {
+        target_points.back() = goal_pos;
+    }
 
     // Cleanup nodes
     for (auto it = node_lookup.begin(); it != node_lookup.end(); it++)
         delete it->second;
+
+    fprintf(stderr, "size = %d\n", target_points.size());
+
+    visualizePath(target_points);
 
     // s = rc_nanos_monotonic_time();
     if (!runSmoother(target_points, trajectory))
@@ -533,7 +565,7 @@ float LocalAStar::computeHeuristic(voxblox::GlobalIndex cur_idx, voxblox::Global
     float dist_to_goal_heuristic = sqrt(3) * sorted[0] + sqrt(2) * (sorted[1] - sorted[0]) + (sorted[2] - sorted[1]);
     float obstacle_heuristic = -obs_dist;
 
-    return dist_to_goal_heuristic + 5 * obstacle_heuristic;
+    return dist_to_goal_heuristic + 2 * obstacle_heuristic;
 }
 
 bool LocalAStar::isBetween(Point3f a, Point3f b, Point3f c)
@@ -565,12 +597,32 @@ void LocalAStar::pruneAStarPath(std::vector<Node *> &path)
     size_t p = 0;
     size_t p_next = 1;
 
-    while (p < path.size() - 1)
-    {
-        int cur_idx = path[p_next]->idx_in_parent;
+    // while (p < path.size() - 1)
+    // {
+    //     int cur_idx = path[p_next]->idx_in_parent;
 
-        while (p_next + 1 < path.size() && cur_idx == path[p_next + 1]->idx_in_parent)
+    //     while (p_next + 1 < path.size() && cur_idx == path[p_next + 1]->idx_in_parent)
+    //     {
+    //         p_next++;
+    //     }
+
+    //     new_path.push_back(path[p_next]);
+    //     p = p_next;
+    //     p_next++;
+    // }
+
+    while (p != path.size() - 1)
+    {
+        Point3f p1 = voxblox::getCenterPointFromGridIndex(path[p]->esdf_idx, voxel_size);
+
+        while (p_next + 1 < path.size() - 1)
         {
+            Point3f p2 = voxblox::getCenterPointFromGridIndex(path[p_next + 1]->esdf_idx, voxel_size);
+            if(detectCollisionEdge(map_->getEsdfMapPtr().get(), p1, p2))
+            {
+                break;
+            }
+
             p_next++;
         }
 
@@ -598,7 +650,7 @@ void LocalAStar::plannerThread()
     {
         loop_sleep(LOCAL_PLANNER_RATE, &next_time);
         uint64_t s = rc_nanos_monotonic_time();
-        
+
         // Get current pose to check if we have reached goal
         rc_tf_t tf_body_wrt_fixed = RC_TF_INITIALIZER;
         map_->getRobotPose(tf_body_wrt_fixed, rc_nanos_monotonic_time());
@@ -618,7 +670,7 @@ void LocalAStar::plannerThread()
         int split_id = -1;
         double split_time = -1.0;
 
-        if(!computeSplitPointDetails(start_pose, split_id, split_time))
+        if (!computeSplitPointDetails(start_pose, split_id, split_time))
         {
             fprintf(stderr, "Failed to compute splitting point. Skipping");
             continue;
@@ -637,7 +689,7 @@ void LocalAStar::plannerThread()
 
         visualizePath(target_points);
 
-        fprintf(stderr, "Planner took %f\n", (double)(rc_nanos_monotonic_time() - s)/1e6);
+        fprintf(stderr, "Planner took %6.2f\n", (double)(rc_nanos_monotonic_time() - s) / 1e6);
     }
 
     running_ = false;
