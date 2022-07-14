@@ -13,9 +13,9 @@
 // TODO Remove
 #include <voxblox/core/esdf_map.h>
 
-#define LOCAL_PLANNER_RATE 1
+#define LOCAL_PLANNER_RATE 5
 #define REACHED_DISTANCE 0.05f
-#define MAX_TRAVEL_COST 15
+#define MAX_TRAVEL_COST 10
 #define PLAN_AHEAD_TIME 0.25
 #define MAX_PLAN_DISTANCE 2
 
@@ -141,8 +141,16 @@ bool LocalAStar::runSmoother(const Point3fVector &target_points, mav_trajectory_
 {
     mav_msgs::EigenTrajectoryPointVector waypoints_for_smoother;
     convertPointsToSmootherFormat(target_points, waypoints_for_smoother);
+
+    // Set the velocity and acceleration
+    waypoints_for_smoother.front().velocity_W = start_vel.cast<double>();
+    waypoints_for_smoother.front().acceleration_W = start_acc.cast<double>();
+
     int num_segments = loco_num_segments < target_points.size() ? loco_num_segments : target_points.size();
     loco_smoother_.setNumSegments(num_segments);
+
+    fprintf(stderr, "segs = %d | waypoints = %d\n", num_segments, waypoints_for_smoother.size());
+    fprintf(stderr, "start_vel = (%f, %f, %f) | start_acc = (%f, %f, %f)\n", start_vel.x(), start_vel.y(), start_vel.z(), start_acc.x(), start_acc.y(), start_acc.z());
 
     return loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory);
 }
@@ -176,18 +184,8 @@ void LocalAStar::stop()
         planning_thread_.join();
 }
 
-void LocalAStar::computeSplitPointDetails(Point3f &start_pose, int &split_id, double &split_time)
+bool LocalAStar::computeSplitPointDetails(Point3f &start_pose, int &split_id, double &split_time)
 {
-    poly_segment_t *last_segment = &current_traj_.segments[current_traj_.n_segments - 1];
-    float x = eval_poly_at_t(last_segment->n_coef, last_segment->cx, last_segment->duration_s);
-    float y = eval_poly_at_t(last_segment->n_coef, last_segment->cy, last_segment->duration_s);
-    float z = eval_poly_at_t(last_segment->n_coef, last_segment->cz, last_segment->duration_s);
-
-    // Default values will be the end of the segment
-    start_pose << x, y, z;
-    split_id = last_segment->id;
-    split_time = last_segment->duration_s;
-
     // Lock and copy the segment variables
     pthread_mutex_lock(&segment_mutex);
     double cur_segment_t = cur_segment_t_;
@@ -199,7 +197,7 @@ void LocalAStar::computeSplitPointDetails(Point3f &start_pose, int &split_id, do
     if (segment_idx < 0)
     {
         fprintf(stderr, "ERROR: Segment id %d does not exist in current trajectory. Planning from end of trajectory\n", cur_segment_id);
-        return;
+        return false;
     }
 
     // Now we need to calculate the time point to start at. We do this by moving PLAN_AHEAD_TIME seconds
@@ -217,8 +215,18 @@ void LocalAStar::computeSplitPointDetails(Point3f &start_pose, int &split_id, do
         float y = eval_poly_at_t(s->n_coef, s->cy, split_time);
         float z = eval_poly_at_t(s->n_coef, s->cz, split_time);
 
+        float vx = eval_vel_at_t(s->n_coef, s->cx, split_time);
+        float vy = eval_vel_at_t(s->n_coef, s->cy, split_time);
+        float vz = eval_vel_at_t(s->n_coef, s->cz, split_time);
+
+        float ax = eval_accel_at_t(s->n_coef, s->cx, split_time);
+        float ay = eval_accel_at_t(s->n_coef, s->cy, split_time);
+        float az = eval_accel_at_t(s->n_coef, s->cz, split_time);
+
         start_pose << x, y, z;
-        return;
+        start_vel << vx, vy, vz;
+        start_acc << ax, ay, az;
+        return true;
     }
 
     // Otherwise step through the following segments to find where the split point occurs
@@ -237,17 +245,52 @@ void LocalAStar::computeSplitPointDetails(Point3f &start_pose, int &split_id, do
             float x = eval_poly_at_t(s->n_coef, s->cx, split_time);
             float y = eval_poly_at_t(s->n_coef, s->cy, split_time);
             float z = eval_poly_at_t(s->n_coef, s->cz, split_time);
+
+            float vx = eval_vel_at_t(s->n_coef, s->cx, split_time);
+            float vy = eval_vel_at_t(s->n_coef, s->cy, split_time);
+            float vz = eval_vel_at_t(s->n_coef, s->cz, split_time);
+
+            float ax = eval_accel_at_t(s->n_coef, s->cx, split_time);
+            float ay = eval_accel_at_t(s->n_coef, s->cy, split_time);
+            float az = eval_accel_at_t(s->n_coef, s->cz, split_time);
+
             start_pose << x, y, z;
-            return;
+            start_vel << vx, vy, vz;
+            start_acc << ax, ay, az;
+            return true;
         }
     }
 
     // We will only reach here if PLAN_AHEAD_TIME occurs past end of the current trajectory
-    // so the default values are correct
+    // so the return the last segment end point
+    poly_segment_t *last_segment = &current_traj_.segments[current_traj_.n_segments - 1];
+    float x = eval_poly_at_t(last_segment->n_coef, last_segment->cx, last_segment->duration_s);
+    float y = eval_poly_at_t(last_segment->n_coef, last_segment->cy, last_segment->duration_s);
+    float z = eval_poly_at_t(last_segment->n_coef, last_segment->cz, last_segment->duration_s);
+
+    float vx = eval_vel_at_t(last_segment->n_coef, last_segment->cx, last_segment->duration_s);
+    float vy = eval_vel_at_t(last_segment->n_coef, last_segment->cy, last_segment->duration_s);
+    float vz = eval_vel_at_t(last_segment->n_coef, last_segment->cz, last_segment->duration_s);
+
+    float ax = eval_accel_at_t(last_segment->n_coef, last_segment->cx, last_segment->duration_s);
+    float ay = eval_accel_at_t(last_segment->n_coef, last_segment->cy, last_segment->duration_s);
+    float az = eval_accel_at_t(last_segment->n_coef, last_segment->cz, last_segment->duration_s);
+
+    start_pose << x, y, z;
+    start_vel << vx, vy, vz;
+    start_acc << ax, ay, az;
+    split_id = last_segment->id;
+    split_time = last_segment->duration_s;
+
+    return true;
 }
 
 bool LocalAStar::getInitialPlan()
 {
+    // Zero out start velocity and acceleration
+    start_vel.setZero();
+    start_acc.setZero();
+
     // Get current pose
     rc_tf_t tf_body_wrt_fixed = RC_TF_INITIALIZER;
     map_->getRobotPose(tf_body_wrt_fixed, rc_nanos_monotonic_time());
@@ -490,7 +533,7 @@ float LocalAStar::computeHeuristic(voxblox::GlobalIndex cur_idx, voxblox::Global
     float dist_to_goal_heuristic = sqrt(3) * sorted[0] + sqrt(2) * (sorted[1] - sorted[0]) + (sorted[2] - sorted[1]);
     float obstacle_heuristic = -obs_dist;
 
-    return dist_to_goal_heuristic + obstacle_heuristic;
+    return dist_to_goal_heuristic + 5 * obstacle_heuristic;
 }
 
 bool LocalAStar::isBetween(Point3f a, Point3f b, Point3f c)
@@ -575,7 +618,11 @@ void LocalAStar::plannerThread()
         int split_id = -1;
         double split_time = -1.0;
 
-        computeSplitPointDetails(start_pose, split_id, split_time);
+        if(!computeSplitPointDetails(start_pose, split_id, split_time))
+        {
+            fprintf(stderr, "Failed to compute splitting point. Skipping");
+            continue;
+        }
 
         Point3fVector target_points;
         mav_trajectory_generation::Trajectory trajectory;

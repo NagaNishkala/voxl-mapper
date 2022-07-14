@@ -66,7 +66,7 @@ private:
         const mav_trajectory_generation::Trajectory &trajectory, int split_id, double split_time, bool first_plan);
     void visualizePath(const Point3fVector &target_points);
 
-    void computeSplitPointDetails(Point3f &start_pose, int &split_id, double &split_time);
+    bool computeSplitPointDetails(Point3f &start_pose, int &split_id, double &split_time);
 
     float computeHeuristic(voxblox::GlobalIndex cur_idx, voxblox::GlobalIndex goal_idx, float obs_dist);
     bool isBetween(Point3f a, Point3f b, Point3f c);
@@ -87,6 +87,9 @@ private:
     int cur_waypoint_;
 
     trajectory_t current_traj_;
+
+    Point3f start_vel;
+    Point3f start_acc;
 
     int plan_ch_;
     int render_ch_;
