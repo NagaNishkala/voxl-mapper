@@ -131,9 +131,9 @@ void VoxlPlanner::resetEstop()
 {
     trajectory_t reset_estop;
     reset_estop.magic_number = TRAJECTORY_MAGIC_NUMBER;
-    reset_estop.traj_command = TRAJ_CMD_ESTOP_ACK;
+    reset_estop.traj_command = TRAJ_CMD_ESTOP_RESET;
     pipe_server_write(plan_ch_, &reset_estop, sizeof(reset_estop));
-    fprintf(stderr, "Planner sent Estop command.\n");
+    fprintf(stderr, "Planner sent Estop Reset command.\n");
 }
 
 void VoxlPlanner::controlPipeCallback(__attribute__((unused)) int ch, char *msg, __attribute__((unused)) int bytes, __attribute__((unused)) void *context)
@@ -280,8 +280,9 @@ void VoxlPlanner::handleProtocolMsg(char *msg, int bytes, VoxlPlanner *planner)
             break;
 
         case msg_type::ESTOP:
-            printf("Received Estop traj protocol msg. Stopped following path\n");
+            printf("Received Estop traj protocol msg. Stopping local planner.\n");
             planner->stopFollowPath();
+            printf("Local planner stopped.\n");
             planner->resetEstop();
             break;
 
