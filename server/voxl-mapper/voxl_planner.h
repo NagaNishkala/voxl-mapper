@@ -31,6 +31,7 @@ public:
     void startFollowPath();
     void stopFollowPath();
     void sendEstopCmd();
+    void resetEstop();
 
 private:
     void setGlobalPlanner(GlobalPlanner *global_planner);
