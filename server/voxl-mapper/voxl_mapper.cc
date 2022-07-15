@@ -68,7 +68,7 @@ namespace voxblox
 
         tsdf_map_.reset(new TsdfMap(config));
         // fast, merged, or simple
-        tsdf_integrator_.reset(new SimpleTsdfIntegrator(integrator_config, tsdf_map_->getTsdfLayerPtr()));
+        tsdf_integrator_.reset(new MergedTsdfIntegrator(integrator_config, tsdf_map_->getTsdfLayerPtr()));
         // mesh params
         mesh_layer_.reset(new MeshLayer(tsdf_map_->block_size()));
         mesh_integrator_.reset(new MeshIntegrator<TsdfVoxel>(mesh_config, tsdf_map_->getTsdfLayerPtr(), mesh_layer_.get()));
