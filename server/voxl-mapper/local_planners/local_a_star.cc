@@ -15,8 +15,8 @@
 
 #define LOCAL_PLANNER_RATE 5
 #define REACHED_DISTANCE 0.05f
-#define MAX_STEPS 20
-#define PLAN_AHEAD_TIME 0.5
+#define MAX_STEPS 10
+#define PLAN_AHEAD_TIME 0.3
 #define MAX_PLAN_DISTANCE 1.5
 
 #define PLAN_NAME "plan_msgs"
@@ -432,7 +432,7 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
             }
 
             Point3f nbr_pos = voxblox::getCenterPointFromGridIndex(nbr_global_idx, voxel_size);
-            float dist_to_global_path = (waypoints_.back() - nbr_pos).norm();
+            float dist_to_global_path_sq = (waypoints_.back() - nbr_pos).squaredNorm();
             for (size_t i = cur_waypoint_; i < waypoints_.size() - 1; i++)
             {
                 Point3f p1 = waypoints_[i];
@@ -444,20 +444,20 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
                 {
                     // Save the end of the line we are closest to as our target
                     float d = line.squaredDistance(nbr_pos);
-                    if (d < dist_to_global_path)
-                        dist_to_global_path = d;
+                    if (d < dist_to_global_path_sq)
+                        dist_to_global_path_sq = d;
                 }
                 else
                 {
-                    float d = fmin((nbr_pos - p1).norm(), (nbr_pos - p2).norm());
-                    if (d < dist_to_global_path)
-                        dist_to_global_path = d;
+                    float d = fmin((nbr_pos - p1).squaredNorm(), (nbr_pos - p2).squaredNorm());
+                    if (d < dist_to_global_path_sq)
+                        dist_to_global_path_sq = d;
                 }
             }
 
             float change_dir_cost = cur_node->idx_in_parent == idx ? 0 : 1;
             float travel_cost = cur_node->travel_cost + voxblox::Neighborhood<voxblox::Connectivity::kTwentySix>::kDistances[idx];
-            travel_cost += change_dir_cost + 10 * dist_to_global_path;
+            travel_cost += change_dir_cost + 10 * pow(dist_to_global_path_sq, 0.5);
 
             // If nbr is in node_lookup fetch the pointer, otherwise create a new node
             if (node_lookup.count(nbr_global_idx) > 0)
@@ -501,7 +501,7 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
         }
     }
 
-    // fprintf(stderr, "A* took = %6.2fms for %d iterations\n", (double)(rc_nanos_monotonic_time() - s) / 1e6, iteration_count);
+    fprintf(stderr, "A* took = %6.2fms for %d iterations\n", (double)(rc_nanos_monotonic_time() - s) / 1e6, iteration_count);
 
     cur_node = best_node;
     std::vector<Node *> path;
