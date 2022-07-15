@@ -290,29 +290,38 @@ void RRTConnect::pruneRRTPath(std::vector<Node *> &rrt_path)
     }
 
     // Level 2 pruning
-    Node *start;
-    Node *end;
+    int p = 0;
+    int p_next = 1;
+    std::vector<Node*> new_path;
+    new_path.reserve(rrt_path.size());
+    new_path.push_back(rrt_path[0]);
 
-    for (size_t i = 0; i < rrt_path.size() - 2; i++)
+    while (p != rrt_path.size() - 1)
     {
-        start = rrt_path[i];
+        Node* node_p = rrt_path[p];
 
-        for (size_t j = rrt_path.size() - 1; j > i; j--)
+        while (p_next + 1 < rrt_path.size() - 1)
         {
-            end = rrt_path[j];
-
-            if (!detectCollisionEdge(esdf_map_.get(), start->position, end->position))
+            Node* node_p_next = rrt_path[p_next + 1];
+            if(detectCollisionEdge(esdf_map_.get(), node_p->position, node_p_next->position))
             {
-                rrt_path.erase(rrt_path.begin() + i + 1, rrt_path.begin() + j);
-                prune_count_l2++;
                 break;
             }
+
+            p_next++;
         }
+
+        new_path.push_back(rrt_path[p_next]);
+        p = p_next;
+        p_next++;
     }
 
-    printf("Level 1: Pruned %d times\n", prune_count_l1);
-    printf("Level 2: Pruned %d times\n", prune_count_l2);
-    fprintf(stderr, "%ld waypoints after pruning\n", rrt_path.size());
+    prune_count_l2 = rrt_path.size() - new_path.size();
+    rrt_path.swap(new_path);
+
+    // printf("Level 1: Pruned %d times\n", prune_count_l1);
+    // printf("Level 2: Pruned %d times\n", prune_count_l2);
+    // fprintf(stderr, "%ld waypoints after pruning\n", rrt_path.size());
 }
 
 void RRTConnect::convertPathToOutput(const std::vector<Node *> &rrt_path, Point3fVector &waypoints)
