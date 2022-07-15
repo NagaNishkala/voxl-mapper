@@ -43,8 +43,9 @@ inline void generateAndSendPath(int ch, std::vector<path_vis_t> points, uint32_t
     if (meta.n_points == 0)
         return;
 
+    int bytes_to_copy = std::min(sizeof(meta.name), name.size());
     memset(meta.name, '\0', sizeof(meta.name));
-    memcpy(meta.name, name.c_str(), sizeof(meta.name));
+    memcpy(meta.name, name.c_str(), bytes_to_copy);
 
     int header_size = sizeof(path_vis_meta_t);
     int data_size = meta.n_points * sizeof(path_vis_t);
