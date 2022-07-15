@@ -73,17 +73,15 @@ private:
 
     bool computeSplitPointDetails(Point3f &start_pose, int &split_id, double &split_time);
 
-    float computeHeuristic(voxblox::GlobalIndex cur_idx, voxblox::GlobalIndex goal_idx, float obs_dist);
+    float computeHeuristic(voxblox::GlobalIndex cur_idx, voxblox::GlobalIndex goal_idx);
     bool isBetween(Point3f a, Point3f b, Point3f c);
 
     void pruneAStarPath(std::vector<Node *> &path);
 
-    Point3f computeGoalPoint(Point3f& start_pos);
-
     Point3fVector waypoints_;
     mav_planning::LocoSmoother loco_smoother_;
 
-    std::shared_ptr<voxblox::TsdfServer> map_;
+    voxblox::TsdfServer* map_;
     pthread_mutex_t map_mutex_;
 
     std::thread planning_thread_;

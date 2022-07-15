@@ -17,7 +17,6 @@
 #define REACHED_DISTANCE 0.05f
 #define MAX_STEPS 10
 #define PLAN_AHEAD_TIME 0.3
-#define MAX_PLAN_DISTANCE 1.5
 
 #define PLAN_NAME "plan_msgs"
 #define PLAN_LOCATION (MODAL_PIPE_DEFAULT_BASE_DIR PLAN_NAME "/")
@@ -149,7 +148,7 @@ bool LocalAStar::runSmoother(const Point3fVector &target_points, mav_trajectory_
     int num_segments = loco_num_segments < target_points.size() ? loco_num_segments : target_points.size();
     loco_smoother_.setNumSegments(num_segments);
 
-    return loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory);
+    return loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory, true);
 }
 
 void LocalAStar::setup()
@@ -311,57 +310,11 @@ bool LocalAStar::getInitialPlan()
     return true;
 }
 
-Point3f LocalAStar::computeGoalPoint(Point3f &start_pos)
-{
-    // Find closest line segment
-    float min_dist = __FLT_MAX__;
-    for (size_t i = cur_waypoint_; i < waypoints_.size() - 1; i++)
-    {
-        Point3f p1 = waypoints_[i];
-        Point3f p2 = waypoints_[i + 1];
-        Eigen::ParametrizedLine<float, 3> line = Eigen::ParametrizedLine<float, 3>::Through(p1, p2);
-
-        // Check if the projection of start pose is within the bounds of the line
-        if (isBetween(p1, p2, line.projection(start_pos)))
-        {
-            // Save the end of the line we are closest to as our target
-            float d = line.squaredDistance(start_pos);
-            if (d < min_dist)
-            {
-                min_dist = d;
-                cur_waypoint_ = i + 1;
-            }
-        }
-    }
-
-    // Add additional waypoints for a longer planning distance
-    float total_dist = 0;
-    float prev_dist = 0;
-    Point3f prev_wp = start_pos;
-
-    for (size_t i = cur_waypoint_; i < waypoints_.size(); i++)
-    {
-        prev_dist = total_dist;
-        total_dist += (waypoints_[i] - prev_wp).norm();
-
-        if (total_dist > MAX_PLAN_DISTANCE)
-        {
-            float remaining_dist = MAX_PLAN_DISTANCE - prev_dist;
-            return prev_wp + (waypoints_[i] - prev_wp).normalized() * remaining_dist;
-        }
-
-        prev_wp = waypoints_[i];
-    }
-
-    return waypoints_.back();
-}
-
 bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav_trajectory_generation::Trajectory &trajectory)
 {
     const voxblox::Layer<voxblox::EsdfVoxel> *layer = map_->getEsdfMapPtr()->getEsdfLayerConstPtr();
 
     // Get goal point
-    // Point3f goal_pos = computeGoalPoint(start_pos);
     Point3f goal_pos = waypoints_.back();
 
     // Calculate start and goal idx
@@ -373,8 +326,6 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     Node *start_node = new Node(0, 0, 0, start_idx, nullptr);
     Node *cur_node;
     Node *nbr_node;
-    Node *best_node;
-    float best_h = std::numeric_limits<float>::max();
 
     // Insert node into our lookup map
     node_lookup.insert(std::make_pair(start_node->esdf_idx, start_node));
@@ -391,13 +342,6 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
         cur_node = open.top();
         open.pop();
 
-        // Need to save best heuristic node incase we end early
-        if (cur_node != start_node && cur_node->heuristic_cost < best_h)
-        {
-            best_node = cur_node;
-            best_h = cur_node->heuristic_cost;
-        }
-
         // "Insert" node into closed set (less overhead using a variable stored in node)
         cur_node->closed = true;
 
@@ -405,12 +349,10 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
         if (cur_node->esdf_idx == goal_idx)
         {
             printf("Reached target\n");
-            best_node = cur_node;
             break;
         }
         else if (cur_node->steps >= MAX_STEPS)
         {
-            best_node = cur_node;
             break;
         }
 
@@ -432,8 +374,9 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
             }
 
             Point3f nbr_pos = voxblox::getCenterPointFromGridIndex(nbr_global_idx, voxel_size);
+            Point3f target_wp = waypoints_.back();
             float dist_to_global_path_sq = (waypoints_.back() - nbr_pos).squaredNorm();
-            for (size_t i = cur_waypoint_; i < waypoints_.size() - 1; i++)
+            for (size_t i = cur_waypoint_ - 1; i < waypoints_.size() - 1; i++)
             {
                 Point3f p1 = waypoints_[i];
                 Point3f p2 = waypoints_[i + 1];
@@ -445,19 +388,39 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
                     // Save the end of the line we are closest to as our target
                     float d = line.squaredDistance(nbr_pos);
                     if (d < dist_to_global_path_sq)
+                    {
                         dist_to_global_path_sq = d;
+                        target_wp = p2;
+                    }
                 }
-                else
-                {
-                    float d = fmin((nbr_pos - p1).squaredNorm(), (nbr_pos - p2).squaredNorm());
-                    if (d < dist_to_global_path_sq)
-                        dist_to_global_path_sq = d;
-                }
+                // If not within bounds then check distance to end point of line
+                // else
+                // {
+                //     float d = (nbr_pos - p2).squaredNorm();
+                //     if (d < dist_to_global_path_sq)
+                //     {
+                //         dist_to_global_path_sq = d;
+                //         target_wp = p2;
+                //     }
+                // }
             }
 
+            // We are trying to find the node that optimizes the following:
+            //  - Shortest distance from start
+            //  - Closest to global path
+            //  - Avoids unneccessary turns
+            //  - Avoids obstacles
+
+            float dist_cost = voxblox::Neighborhood<voxblox::Connectivity::kTwentySix>::kDistances[idx];
+            float dist_to_global_path_cost = pow(dist_to_global_path_sq, 0.5);
             float change_dir_cost = cur_node->idx_in_parent == idx ? 0 : 1;
-            float travel_cost = cur_node->travel_cost + voxblox::Neighborhood<voxblox::Connectivity::kTwentySix>::kDistances[idx];
-            travel_cost += change_dir_cost + 10 * pow(dist_to_global_path_sq, 0.5);
+            float obs_cost = -esdf_voxel->distance;
+
+            float travel_cost = cur_node->travel_cost + 
+                                dist_cost + 
+                                change_dir_cost + 
+                                dist_to_global_path_cost * 5 - 
+                                obs_cost * 2;
 
             // If nbr is in node_lookup fetch the pointer, otherwise create a new node
             if (node_lookup.count(nbr_global_idx) > 0)
@@ -479,8 +442,7 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
                     nbr_node->idx_in_parent = idx;
                     nbr_node->steps = cur_node->steps + 1;
 
-                    // Hack to reorder heap
-                    // TODO: Check if remove then insert is faster
+                    // Reorder priority queue since we have changed the value
                     std::make_heap(const_cast<Node **>(&open.top()),
                                    const_cast<Node **>(&open.top()) + open.size(),
                                    Compare());
@@ -488,7 +450,9 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
             }
             else
             {
-                float heuristic_cost = computeHeuristic(nbr_global_idx, goal_idx, esdf_voxel->distance);
+                voxblox::GlobalIndex target_wp_idx = voxblox::getGridIndexFromPoint<voxblox::GlobalIndex>(target_wp, 1.0f / voxel_size);
+
+                float heuristic_cost = computeHeuristic(nbr_global_idx, goal_idx);
                 nbr_node = new Node(travel_cost + heuristic_cost, travel_cost, heuristic_cost, nbr_global_idx, cur_node);
                 nbr_node->idx_in_parent = idx;
 
@@ -503,7 +467,6 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
 
     fprintf(stderr, "A* took = %6.2fms for %d iterations\n", (double)(rc_nanos_monotonic_time() - s) / 1e6, iteration_count);
 
-    cur_node = best_node;
     std::vector<Node *> path;
 
     // Get the path out and reverse it
@@ -517,8 +480,7 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     pruneAStarPath(path);
 
     // Convert path to correct format for smoother
-    target_points.push_back(start_pos);
-    for (int i = 1; i < path.size(); i++)
+    for (int i = 0; i < path.size(); i++)
     {
         Point3f pos = voxblox::getCenterPointFromGridIndex(path[i]->esdf_idx, voxel_size);
         target_points.push_back(pos);
@@ -536,8 +498,6 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     for (auto it = node_lookup.begin(); it != node_lookup.end(); it++)
         delete it->second;
 
-    fprintf(stderr, "size = %d\n", target_points.size());
-
     visualizePath(target_points);
 
     // s = rc_nanos_monotonic_time();
@@ -551,7 +511,7 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     return true;
 }
 
-float LocalAStar::computeHeuristic(voxblox::GlobalIndex cur_idx, voxblox::GlobalIndex goal_idx, float obs_dist)
+float LocalAStar::computeHeuristic(voxblox::GlobalIndex cur_idx, voxblox::GlobalIndex goal_idx)
 {
     int64_t dx = abs(cur_idx(0) - goal_idx(0));
     int64_t dy = abs(cur_idx(1) - goal_idx(1));
@@ -562,10 +522,7 @@ float LocalAStar::computeHeuristic(voxblox::GlobalIndex cur_idx, voxblox::Global
 
     std::sort(sorted, sorted + n);
 
-    float dist_to_goal_heuristic = sqrt(3) * sorted[0] + sqrt(2) * (sorted[1] - sorted[0]) + (sorted[2] - sorted[1]);
-    float obstacle_heuristic = -obs_dist;
-
-    return dist_to_goal_heuristic + 2 * obstacle_heuristic;
+    return sqrt(3) * sorted[0] + sqrt(2) * (sorted[1] - sorted[0]) + (sorted[2] - sorted[1]);
 }
 
 bool LocalAStar::isBetween(Point3f a, Point3f b, Point3f c)
@@ -689,7 +646,7 @@ void LocalAStar::plannerThread()
 
         visualizePath(target_points);
 
-        fprintf(stderr, "Planner took %6.2f\n", (double)(rc_nanos_monotonic_time() - s) / 1e6);
+        fprintf(stderr, "Local planner took %6.2f\n", (double)(rc_nanos_monotonic_time() - s) / 1e6);
     }
 
     running_ = false;
@@ -712,4 +669,5 @@ void LocalAStar::setPlan(const Point3fVector &waypoints)
 LocalAStar::~LocalAStar()
 {
     stop();
+    map_ = nullptr;
 }
