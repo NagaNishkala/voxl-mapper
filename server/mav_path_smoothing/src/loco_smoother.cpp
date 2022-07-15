@@ -37,7 +37,7 @@ namespace mav_planning
 
     bool LocoSmoother::getTrajectoryBetweenWaypoints(
         const mav_msgs::EigenTrajectoryPoint::Vector &waypoints,
-        mav_trajectory_generation::Trajectory *trajectory) const
+        mav_trajectory_generation::Trajectory *trajectory, bool only_linear) const
     {
         // If there's less than 3 waypoints, there are no free variables for loco.
         if (waypoints.size() < 2)
@@ -67,6 +67,13 @@ namespace mav_planning
         {
             PolynomialSmoother::getTrajectoryBetweenWaypoints(waypoints, &traj_initial);
         }
+
+        if(only_linear)
+        {
+            *trajectory = traj_initial;
+            return true;
+        }
+
 
         // Polynomials should always be of degree kPolynomialDegree 
         // Polynomials are need for three dimensions (x, y, z)

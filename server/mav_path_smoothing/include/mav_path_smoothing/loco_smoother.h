@@ -29,7 +29,8 @@ class LocoSmoother : public PolynomialSmoother {
 
   virtual bool getTrajectoryBetweenWaypoints(
       const mav_msgs::EigenTrajectoryPoint::Vector& waypoints,
-      mav_trajectory_generation::Trajectory* trajectory) const;
+      mav_trajectory_generation::Trajectory* trajectory,
+      bool only_linear = false) const;
 
   // Special case for num_waypoints = 2 (splits trajectory into num_segments).
   virtual bool getTrajectoryBetweenTwoPoints(
