@@ -60,7 +60,7 @@ void VoxlPlanner::initMPA()
 
 void VoxlPlanner::setMap(voxblox::TsdfServer *mapper)
 {
-    mapper_.reset(mapper);
+    mapper_ = mapper;
 
     setGlobalPlanner(new RRTConnect(mapper->getEsdfMapPtr(), render_ch_));
     setLocalPlanner(new LocalAStar(mapper, plan_ch_, render_ch_));
@@ -174,7 +174,7 @@ ControlMessageType VoxlPlanner::getMessageType(char *msg, int bytes)
 
 void VoxlPlanner::handlePlanCmd(char *msg, VoxlPlanner *planner)
 {
-    voxblox::TsdfServer *mapper = planner->mapper_.get();
+    voxblox::TsdfServer *mapper = planner->mapper_;
     std::string cmd(msg);
 
     if (cmd == PLAN_HOME)
@@ -312,5 +312,10 @@ VoxlPlanner::~VoxlPlanner()
         global_planner_->tearDown();
 
     delete local_planner_;
+    local_planner_ = nullptr;
+
     delete global_planner_;
+    global_planner_ = nullptr;
+
+    mapper_ = nullptr;
 }

@@ -117,9 +117,6 @@ namespace voxblox
         std::thread visual_updates_thread;
         std::atomic<bool> keep_updating;
 
-        // paths
-        mav_trajectory_generation::Trajectory path_to_follow;
-
         // costmap
         std::unordered_map<std::pair<float, float>, float, hash_pair> cost_map;
     };

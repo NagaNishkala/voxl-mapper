@@ -51,7 +51,7 @@ private:
     int render_ch_;
     int plan_ch_;
 
-    std::shared_ptr<voxblox::TsdfServer> mapper_;
+    voxblox::TsdfServer *mapper_;
 
     bool en_debug_ = false;
 };
