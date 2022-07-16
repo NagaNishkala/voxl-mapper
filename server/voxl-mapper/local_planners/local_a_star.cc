@@ -14,8 +14,8 @@
 #include <voxblox/core/esdf_map.h>
 
 #define LOCAL_PLANNER_RATE 5
-#define REACHED_DISTANCE 0.05f
-#define MAX_STEPS 10
+#define REACHED_DISTANCE 0.1f
+#define MAX_STEPS 15
 #define PLAN_AHEAD_TIME 0.3
 
 #define PLAN_NAME "plan_msgs"
@@ -36,6 +36,7 @@ LocalAStar::LocalAStar(voxblox::TsdfServer *map, int plan_ch, int render_ch)
 
 bool LocalAStar::sendTrajectory(const mav_trajectory_generation::Trajectory &trajectory, int split_id, double split_time, bool first_plan = false)
 {
+    // TODO: Bug: if mapper has sent then quits there may be issues computing split point
     static int segment_id = 0;
 
     trajectory_t out;
@@ -136,14 +137,15 @@ void LocalAStar::visualizePath(const Point3fVector &target_points)
     generateAndSendPath(render_ch_, traj, PATH_VIS_TRAJECTORY, "LocalAStar Smoothed");
 }
 
-bool LocalAStar::runSmoother(const Point3fVector &target_points, mav_trajectory_generation::Trajectory &trajectory)
+bool LocalAStar:: runSmoother(const Point3fVector &target_points, mav_trajectory_generation::Trajectory &trajectory)
 {
     mav_msgs::EigenTrajectoryPointVector waypoints_for_smoother;
     convertPointsToSmootherFormat(target_points, waypoints_for_smoother);
 
     // Set the velocity and acceleration
     waypoints_for_smoother.front().velocity_W = start_vel.cast<double>();
-    waypoints_for_smoother.front().acceleration_W = start_acc.cast<double>();
+    // waypoints_for_smoother.front().acceleration_W = start_acc.cast<double>();
+    waypoints_for_smoother.front().acceleration_W = Point3d::Zero();
 
     int num_segments = loco_num_segments < target_points.size() ? loco_num_segments : target_points.size();
     loco_smoother_.setNumSegments(num_segments);
@@ -348,7 +350,6 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
         // Check if we have reached end condition (reached global goal or max distance away from start point)
         if (cur_node->esdf_idx == goal_idx)
         {
-            printf("Reached target\n");
             break;
         }
         else if (cur_node->steps >= MAX_STEPS)
@@ -419,8 +420,8 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
             float travel_cost = cur_node->travel_cost + 
                                 dist_cost + 
                                 change_dir_cost + 
-                                dist_to_global_path_cost * 5 - 
-                                obs_cost * 2;
+                                dist_to_global_path_cost * 3 - 
+                                obs_cost * 10;
 
             // If nbr is in node_lookup fetch the pointer, otherwise create a new node
             if (node_lookup.count(nbr_global_idx) > 0)
@@ -450,8 +451,6 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
             }
             else
             {
-                voxblox::GlobalIndex target_wp_idx = voxblox::getGridIndexFromPoint<voxblox::GlobalIndex>(target_wp, 1.0f / voxel_size);
-
                 float heuristic_cost = computeHeuristic(nbr_global_idx, goal_idx);
                 nbr_node = new Node(travel_cost + heuristic_cost, travel_cost, heuristic_cost, nbr_global_idx, cur_node);
                 nbr_node->idx_in_parent = idx;
@@ -483,6 +482,17 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     for (int i = 0; i < path.size(); i++)
     {
         Point3f pos = voxblox::getCenterPointFromGridIndex(path[i]->esdf_idx, voxel_size);
+
+        // Shift points by the gradients in the map (except for start and end positions)
+        // if (!(i == 0 || i == path.size() - 1))
+        // {
+        //     Point3f grad;
+        //     float dist = getMapDistanceAndGradient(map_->getEsdfMapPtr().get(), pos, &grad);
+        //     float norm = grad.norm();
+        //     pos += grad.normalized() * robot_radius;
+        //     fprintf(stderr, "Gradient length = %f\n", norm);
+        // }
+
         target_points.push_back(pos);
     }
 
@@ -568,6 +578,12 @@ void LocalAStar::pruneAStarPath(std::vector<Node *> &path)
     //     p_next++;
     // }
 
+    // path.swap(new_path);
+    // new_path.clear();
+
+    // p = 0;
+    // p_next = 1;
+
     while (p != path.size() - 1)
     {
         Point3f p1 = voxblox::getCenterPointFromGridIndex(path[p]->esdf_idx, voxel_size);
@@ -629,7 +645,7 @@ void LocalAStar::plannerThread()
 
         if (!computeSplitPointDetails(start_pose, split_id, split_time))
         {
-            fprintf(stderr, "Failed to compute splitting point. Skipping");
+            fprintf(stderr, "Failed to compute splitting point. Skippinng\n");
             continue;
         }
 
