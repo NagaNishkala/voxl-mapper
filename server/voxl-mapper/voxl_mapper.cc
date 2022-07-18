@@ -73,6 +73,9 @@ namespace voxblox
         mesh_layer_.reset(new MeshLayer(tsdf_map_->block_size()));
         mesh_integrator_.reset(new MeshIntegrator<TsdfVoxel>(mesh_config, tsdf_map_->getTsdfLayerPtr(), mesh_layer_.get()));
 
+        ICP::Config icp_config;
+        icp_ = new ICP(icp_config);
+
         str_esdf_save_path.assign(esdf_save_path, BUF_LEN);
         str_tsdf_save_path.assign(tsdf_save_path, BUF_LEN);
         str_mesh_save_path.assign(mesh_save_path, BUF_LEN);
@@ -262,7 +265,19 @@ namespace voxblox
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         voxblox::Pointcloud _pub_ptcloud;
-        voxblox::transformPointcloud(vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
+        voxblox::Transformation refined_vb_tof_to_fixed;
+        // voxblox::transformPointcloud(vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
+
+        int64_t start_time = rc_nanos_monotonic_time();
+        const size_t num_icp_updates = server->icp_->runICP(server->tsdf_map_->getTsdfLayer(), ptcloud, vb_tof_to_fixed, &refined_vb_tof_to_fixed);
+        int64_t end_time = rc_nanos_monotonic_time();
+
+        if (server->en_timing)
+        {
+            printf("ICP Took: %0.1f ms for %d iterations\n", (end_time - start_time) / 1000000.0, num_icp_updates);
+        }
+
+        voxblox::transformPointcloud(refined_vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
 
         point_cloud_metadata_t aligned_ptc_meta;
         aligned_ptc_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
@@ -276,24 +291,23 @@ namespace voxblox
         // pointcloud gradient coloring
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         constexpr float heat[] =
-        {
-            0.0, 0.0, 1.0,
-            0.0, 1.0, 1.0,
-            0.0, 1.0, 0.0,
-            1.0, 1.0, 0.0,
-            1.0, 0.0, 0.0
-        };
+            {
+                0.0, 0.0, 1.0,
+                0.0, 1.0, 1.0,
+                0.0, 1.0, 0.0,
+                1.0, 1.0, 0.0,
+                1.0, 0.0, 0.0};
 
         for (size_t i = 0; i < ptcloud.size(); i++)
         {
             float height = _pub_ptcloud[i].z() / RAINBOW_REPEAT_DIST;
 
             // floating point modulus
-            while(height > 1.0)
-                height -= 1.0;
+            while (height > 1.0f)
+                height -= 1.0f;
 
-            while(height < 0.0)
-                height += 1.0;
+            while (height < 0.0f)
+                height += 1.0f;
 
             float a = height * 5;
             int color0 = std::floor(a);
@@ -306,9 +320,9 @@ namespace voxblox
         }
 
         // PHEW, finally, send in the point cloud to TSDF
-        int64_t start_time = rc_nanos_monotonic_time();
+        start_time = rc_nanos_monotonic_time();
         server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
-        int64_t end_time = rc_nanos_monotonic_time();
+        end_time = rc_nanos_monotonic_time();
 
         if (server->en_timing)
         {

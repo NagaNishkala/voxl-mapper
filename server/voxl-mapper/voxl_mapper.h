@@ -16,6 +16,8 @@
 #include "rc_transform_ringbuf.h"
 #include "config_file.h"
 
+#include "icp.h"
+
 namespace voxblox
 {
 
@@ -90,6 +92,8 @@ namespace voxblox
         static pthread_mutex_t esdf_mutex;
         static pthread_mutex_t tsdf_mutex;
         static rc_tfv_ringbuf_t buf;
+
+        ICP *icp_;
 
     protected:
         VoxlPlanner planner_;
