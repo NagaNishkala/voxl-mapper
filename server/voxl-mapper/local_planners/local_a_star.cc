@@ -599,6 +599,41 @@ void LocalAStar::pruneAStarPath(std::vector<Node *> &path)
     path.swap(new_path);
 }
 
+bool LocalAStar::isTrajectoryInCollision(double &time_to_end)
+{
+    // Lock and copy the segment variables
+    pthread_mutex_lock(&segment_mutex);
+    double cur_segment_t = cur_segment_t_;
+    int cur_segment_id = cur_segment_id_;
+    pthread_mutex_unlock(&segment_mutex);
+
+    int segment_idx = get_segment_idx(&current_traj_, cur_segment_id);
+    double t = cur_segment_t;
+
+    for(int i = segment_idx; i < current_traj_.n_segments; i++)
+    {
+        poly_segment_t *cur_seg = &current_traj_.segments[i];
+
+        for(; t < cur_seg->duration_s; t += COLLISION_SAMPLING_DT)
+        {
+            float x = eval_poly_at_t(cur_seg->n_coef, cur_seg->cx, t);
+            float y = eval_poly_at_t(cur_seg->n_coef, cur_seg->cy, t);
+            float z = eval_poly_at_t(cur_seg->n_coef, cur_seg->cz, t);
+
+            time_to_end += cur_seg->duration_s;
+
+            if (detectCollision(map_->getEsdfMapPtr().get(), Point3f(x, y, z)))
+            {
+                return true;
+            }
+        }
+
+        t = 0;
+    }
+
+    return false;
+}
+
 void LocalAStar::plannerThread()
 {
     int64_t next_time = 0;
@@ -629,6 +664,20 @@ void LocalAStar::plannerThread()
         }
 
         map_->updateEsdf(true);
+
+        // // If previous trajectory is collision free then we can potentially skip the planner
+        // double time_to_end = 0;
+        // if(isTrajectoryInCollision(time_to_end))
+        // {
+        //     printf("------- %f\n", time_to_end);
+
+        //     // Only skip if there is enough time on the trajectory
+        //     if (time_to_end > PLAN_AHEAD_TIME)
+        //     {
+        //         printf("Trajectory is still collision free. Skipping planner iteration with %f seconds left in trajectory\n", time_to_end);
+        //         continue;
+        //     }
+        // }
 
         // Proceed with the planner
         Point3f start_pose;

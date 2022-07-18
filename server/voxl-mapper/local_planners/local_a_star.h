@@ -78,6 +78,9 @@ private:
 
     void pruneAStarPath(std::vector<Node *> &path);
 
+    // Returns if traj in collision but also gives time to end of trajectory or time to collision if true
+    bool isTrajectoryInCollision(double &time_to_end);
+
     Point3fVector waypoints_;
     mav_planning::LocoSmoother loco_smoother_;
 
