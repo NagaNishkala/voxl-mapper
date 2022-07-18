@@ -17,6 +17,7 @@
 #define REACHED_DISTANCE 0.1f
 #define MAX_STEPS 15
 #define PLAN_AHEAD_TIME 0.3
+#define COLLISION_SAMPLING_DT 0.1
 
 #define PLAN_NAME "plan_msgs"
 #define PLAN_LOCATION (MODAL_PIPE_DEFAULT_BASE_DIR PLAN_NAME "/")
@@ -144,13 +145,12 @@ bool LocalAStar:: runSmoother(const Point3fVector &target_points, mav_trajectory
 
     // Set the velocity and acceleration
     waypoints_for_smoother.front().velocity_W = start_vel.cast<double>();
-    // waypoints_for_smoother.front().acceleration_W = start_acc.cast<double>();
-    waypoints_for_smoother.front().acceleration_W = Point3d::Zero();
+    waypoints_for_smoother.front().acceleration_W = start_acc.cast<double>();
 
-    int num_segments = loco_num_segments < target_points.size() ? loco_num_segments : target_points.size();
-    loco_smoother_.setNumSegments(num_segments);
+    // int num_segments = loco_num_segments < target_points.size() ? loco_num_segments : target_points.size();
+    // loco_smoother_.setNumSegments(num_segments);
 
-    return loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory, true);
+    return loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory, false);
 }
 
 void LocalAStar::setup()
@@ -414,14 +414,17 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
 
             float dist_cost = voxblox::Neighborhood<voxblox::Connectivity::kTwentySix>::kDistances[idx];
             float dist_to_global_path_cost = pow(dist_to_global_path_sq, 0.5);
-            float change_dir_cost = cur_node->idx_in_parent == idx ? 0 : 1;
-            float obs_cost = -esdf_voxel->distance;
+            float change_dir_cost = (voxblox::NeighborhoodLookupTables::kOffsets.col(cur_node->idx_in_parent) - voxblox::NeighborhoodLookupTables::kOffsets.col(idx)).norm();
+            float obs_cost = esdf_voxel->distance == 0.0 ? esdf_default_distance : esdf_voxel->distance;
+            obs_cost = 1/obs_cost;
 
             float travel_cost = cur_node->travel_cost + 
                                 dist_cost + 
-                                change_dir_cost + 
-                                dist_to_global_path_cost * 3 - 
-                                obs_cost * 10;
+                                change_dir_cost * 2 + 
+                                dist_to_global_path_cost * 2 + 
+                                obs_cost;
+
+            // fprintf(stderr, "%f, %f, %f, %f\n", dist_to_global_path_cost, change_dir_cost, obs_cost, esdf_voxel->distance);
 
             // If nbr is in node_lookup fetch the pointer, otherwise create a new node
             if (node_lookup.count(nbr_global_idx) > 0)
@@ -482,17 +485,6 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
     for (int i = 0; i < path.size(); i++)
     {
         Point3f pos = voxblox::getCenterPointFromGridIndex(path[i]->esdf_idx, voxel_size);
-
-        // Shift points by the gradients in the map (except for start and end positions)
-        // if (!(i == 0 || i == path.size() - 1))
-        // {
-        //     Point3f grad;
-        //     float dist = getMapDistanceAndGradient(map_->getEsdfMapPtr().get(), pos, &grad);
-        //     float norm = grad.norm();
-        //     pos += grad.normalized() * robot_radius;
-        //     fprintf(stderr, "Gradient length = %f\n", norm);
-        // }
-
         target_points.push_back(pos);
     }
 
