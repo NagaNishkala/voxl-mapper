@@ -147,8 +147,8 @@ bool LocalAStar:: runSmoother(const Point3fVector &target_points, mav_trajectory
     waypoints_for_smoother.front().velocity_W = start_vel.cast<double>();
     waypoints_for_smoother.front().acceleration_W = start_acc.cast<double>();
 
-    // int num_segments = loco_num_segments < target_points.size() ? loco_num_segments : target_points.size();
-    // loco_smoother_.setNumSegments(num_segments);
+    int num_segments = loco_num_segments < target_points.size() ? loco_num_segments : target_points.size();
+    loco_smoother_.setNumSegments(num_segments);
 
     return loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory, false);
 }
@@ -414,15 +414,16 @@ bool LocalAStar::runPlanner(Point3f start_pos, Point3fVector &target_points, mav
 
             float dist_cost = voxblox::Neighborhood<voxblox::Connectivity::kTwentySix>::kDistances[idx];
             float dist_to_global_path_cost = pow(dist_to_global_path_sq, 0.5);
-            float change_dir_cost = (voxblox::NeighborhoodLookupTables::kOffsets.col(cur_node->idx_in_parent) - voxblox::NeighborhoodLookupTables::kOffsets.col(idx)).norm();
+            // float change_dir_cost = (voxblox::NeighborhoodLookupTables::kOffsets.col(cur_node->idx_in_parent) - voxblox::NeighborhoodLookupTables::kOffsets.col(idx)).norm();
+            float change_dir_cost = cur_node->idx_in_parent == idx ? 0 : 1;
             float obs_cost = esdf_voxel->distance == 0.0 ? esdf_default_distance : esdf_voxel->distance;
             obs_cost = 1/obs_cost;
 
             float travel_cost = cur_node->travel_cost + 
                                 dist_cost + 
-                                change_dir_cost * 2 + 
-                                dist_to_global_path_cost * 2 + 
-                                obs_cost;
+                                change_dir_cost + 
+                                dist_to_global_path_cost * 3 + 
+                                obs_cost * 3;
 
             // fprintf(stderr, "%f, %f, %f, %f\n", dist_to_global_path_cost, change_dir_cost, obs_cost, esdf_voxel->distance);
 
@@ -599,41 +600,6 @@ void LocalAStar::pruneAStarPath(std::vector<Node *> &path)
     path.swap(new_path);
 }
 
-bool LocalAStar::isTrajectoryInCollision(double &time_to_end)
-{
-    // Lock and copy the segment variables
-    pthread_mutex_lock(&segment_mutex);
-    double cur_segment_t = cur_segment_t_;
-    int cur_segment_id = cur_segment_id_;
-    pthread_mutex_unlock(&segment_mutex);
-
-    int segment_idx = get_segment_idx(&current_traj_, cur_segment_id);
-    double t = cur_segment_t;
-
-    for(int i = segment_idx; i < current_traj_.n_segments; i++)
-    {
-        poly_segment_t *cur_seg = &current_traj_.segments[i];
-
-        for(; t < cur_seg->duration_s; t += COLLISION_SAMPLING_DT)
-        {
-            float x = eval_poly_at_t(cur_seg->n_coef, cur_seg->cx, t);
-            float y = eval_poly_at_t(cur_seg->n_coef, cur_seg->cy, t);
-            float z = eval_poly_at_t(cur_seg->n_coef, cur_seg->cz, t);
-
-            time_to_end += cur_seg->duration_s;
-
-            if (detectCollision(map_->getEsdfMapPtr().get(), Point3f(x, y, z)))
-            {
-                return true;
-            }
-        }
-
-        t = 0;
-    }
-
-    return false;
-}
-
 void LocalAStar::plannerThread()
 {
     int64_t next_time = 0;
@@ -664,20 +630,6 @@ void LocalAStar::plannerThread()
         }
 
         map_->updateEsdf(true);
-
-        // // If previous trajectory is collision free then we can potentially skip the planner
-        // double time_to_end = 0;
-        // if(isTrajectoryInCollision(time_to_end))
-        // {
-        //     printf("------- %f\n", time_to_end);
-
-        //     // Only skip if there is enough time on the trajectory
-        //     if (time_to_end > PLAN_AHEAD_TIME)
-        //     {
-        //         printf("Trajectory is still collision free. Skipping planner iteration with %f seconds left in trajectory\n", time_to_end);
-        //         continue;
-        //     }
-        // }
 
         // Proceed with the planner
         Point3f start_pose;
