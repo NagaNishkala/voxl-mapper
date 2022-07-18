@@ -32,7 +32,10 @@ void GlobalSmoother::start()
         trajectory_t out;
 
         if (!convertMavTrajectoryToVoxlTrajectory(trajectory, out))
-            return false;
+        {
+            printf("Failed to convert trajectory to expected type\n");
+            return;
+        }
 
         out.magic_number = TRAJECTORY_MAGIC_NUMBER;
 
@@ -49,4 +52,12 @@ void GlobalSmoother::start()
     {
         printf("Smoother failed to find a path.\n");
     }
+}
+
+void GlobalSmoother::stop()
+{
+}
+
+GlobalSmoother::~GlobalSmoother()
+{
 }

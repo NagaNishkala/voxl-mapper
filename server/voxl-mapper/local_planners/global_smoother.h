@@ -24,3 +24,5 @@ class GlobalSmoother : public LocalPlanner
     int plan_ch_;
     int render_ch_;
 };
+
+#endif
