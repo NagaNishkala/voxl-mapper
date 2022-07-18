@@ -275,64 +275,34 @@ namespace voxblox
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // pointcloud gradient coloring
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        constexpr float heat[] =
+        {
+            0.0, 0.0, 1.0,
+            0.0, 1.0, 1.0,
+            0.0, 1.0, 0.0,
+            1.0, 1.0, 0.0,
+            1.0, 0.0, 0.0
+        };
 
         for (size_t i = 0; i < ptcloud.size(); i++)
         {
-            float height = _pub_ptcloud[i].z();
+            float height = _pub_ptcloud[i].z() / RAINBOW_REPEAT_DIST;
 
             // floating point modulus
-            int mod = 0;
-            int intheight = (int)height;
-            while ((mod + 1) * RAINBOW_REPEAT_DIST <= intheight)
-                mod++;
-            while ((mod)*RAINBOW_REPEAT_DIST > intheight)
-                mod--;
+            while(height > 1.0)
+                height -= 1.0;
 
-            height -= mod * RAINBOW_REPEAT_DIST;
-            height /= RAINBOW_REPEAT_DIST;
+            while(height < 0.0)
+                height += 1.0;
 
             float a = height * 5;
-            int X = (int)(a);
-            int Y = (int)(255 * (a - X));
-            int r = 0, g = 0, b = 0;
-            switch (X)
-            {
-            case 0:
-                r = 255;
-                g = Y;
-                b = 0;
-                break;
-            case 1:
-                r = 255 - Y;
-                g = 255;
-                b = 0;
-                break;
-            case 2:
-                r = 0;
-                g = 255;
-                b = Y;
-                break;
-            case 3:
-                r = 0;
-                g = 255 - Y;
-                b = 255;
-                break;
-            case 4:
-                r = Y;
-                g = 0;
-                b = 255;
-                break;
-            case 5:
-                r = 255;
-                g = 0;
-                b = 255;
-                break;
-            }
+            int color0 = std::floor(a);
+            int color1 = std::ceil(a);
+            float t = a - color0;
 
-            _colors[i].r = r;
-            _colors[i].g = g;
-            _colors[i].b = b;
-            _colors[i].a = 127;
+            _colors[i].r = 255 * ((1 - t) * heat[color0 * 3] + t * heat[color1 * 3]);
+            _colors[i].g = 255 * ((1 - t) * heat[color0 * 3 + 1] + t * heat[color1 * 3 + 1]);
+            _colors[i].b = 255 * ((1 - t) * heat[color0 * 3 + 2] + t * heat[color1 * 3 + 2]);
         }
 
         // PHEW, finally, send in the point cloud to TSDF
