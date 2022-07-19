@@ -9,8 +9,6 @@
 #include <unordered_map>
 #include <mav_trajectory_generation/trajectory_sampling.h>
 
-#include "global_planners/rrt_connect.h"
-#include "local_planners/simple_follower.h"
 #include "timing_utils.h"
 
 #define PROCESS_NAME "voxl-mapper"
@@ -321,7 +319,7 @@ namespace voxblox
 
         // PHEW, finally, send in the point cloud to TSDF
         start_time = rc_nanos_monotonic_time();
-        server->integratePointcloud(vb_tof_to_fixed, ptcloud, _colors, false);
+        server->integratePointcloud(refined_vb_tof_to_fixed, ptcloud, _colors, false);
         end_time = rc_nanos_monotonic_time();
 
         if (server->en_timing)
