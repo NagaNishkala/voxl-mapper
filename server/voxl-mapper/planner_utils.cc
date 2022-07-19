@@ -178,7 +178,7 @@ bool detectCollisionEdge(const voxblox::EsdfMap *map, const Point3f &start, cons
     else
         dist = step_size;
 
-    int num_of_steps = floor(dist / robot_radius);
+    int num_of_steps = floor(dist / voxel_size);
 
     // If end is in collision dont bother
     if (detectCollision(map, end))
@@ -187,7 +187,7 @@ bool detectCollisionEdge(const voxblox::EsdfMap *map, const Point3f &start, cons
     }
 
     // A direction vector with length of robot radius
-    Point3f dir_vec = ((end - start) / dist) * robot_radius;
+    Point3f dir_vec = ((end - start) / dist) * voxel_size;
     Point3f pos = start + dir_vec;
 
     // Step towards goal and check collision

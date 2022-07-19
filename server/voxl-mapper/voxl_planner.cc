@@ -1,7 +1,7 @@
 #include "voxl_planner.h"
 #include <modal_pipe.h>
 #include "global_planners/rrt_connect.h"
-#include "local_planners/local_a_star.h"
+#include "local_planners/global_smoother.h"
 #include "voxl_mapper.h"
 #include "timing_utils.h"
 #include "voxl_trajectory.h"
@@ -63,7 +63,7 @@ void VoxlPlanner::setMap(voxblox::TsdfServer *mapper)
     mapper_ = mapper;
 
     setGlobalPlanner(new RRTConnect(mapper->getEsdfMapPtr(), render_ch_));
-    setLocalPlanner(new LocalAStar(mapper, plan_ch_, render_ch_));
+    setLocalPlanner(new GlobalSmoother(mapper, plan_ch_, render_ch_));
 }
 
 void VoxlPlanner::setGlobalPlanner(GlobalPlanner *global_planner)

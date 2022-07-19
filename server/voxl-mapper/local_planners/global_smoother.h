@@ -17,6 +17,8 @@ class GlobalSmoother : public LocalPlanner
     void stop();
 
     private:
+    void visualizePath(trajectory_t &current_traj);
+
     Point3fVector waypoints_;
     mav_planning::LocoSmoother loco_smoother_;
     voxblox::TsdfServer* map_;

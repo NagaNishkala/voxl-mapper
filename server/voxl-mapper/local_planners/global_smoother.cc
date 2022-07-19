@@ -1,4 +1,5 @@
 #include "global_smoother.h"
+#include "path_vis.h"
 
 GlobalSmoother::GlobalSmoother(voxblox::TsdfServer *map, int plan_ch, int render_ch)
     : map_(map),
@@ -25,7 +26,10 @@ void GlobalSmoother::start()
 
     mav_trajectory_generation::Trajectory trajectory;
 
-    if (loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory))
+    // int num_segments = loco_num_segments < waypoints_.size() ? loco_num_segments : waypoints_.size();
+    // loco_smoother_.setNumSegments(num_segments);
+
+    if (loco_smoother_.getTrajectoryBetweenWaypoints(waypoints_for_smoother, &trajectory, false))
     {
         int segment_id = 0;
 
@@ -46,6 +50,9 @@ void GlobalSmoother::start()
         out.traj_command = TRAJ_CMD_LOAD_AND_START;
 
         printf("Sending trajectory to plan channel\n");
+
+        visualizePath(out);
+
         pipe_server_write(plan_ch_, &out, sizeof(trajectory_t));
     }
     else
@@ -56,6 +63,31 @@ void GlobalSmoother::start()
 
 void GlobalSmoother::stop()
 {
+    waypoints_.clear();
+}
+
+void GlobalSmoother::visualizePath(trajectory_t &current_traj)
+{
+    std::vector<path_vis_t> traj;
+    double sampling_dt = 0.05;
+
+    for (int i = 0; i < current_traj.n_segments; i++)
+    {
+        poly_segment_t *s = &current_traj.segments[i];
+        for (double t = 0.0; t < s->duration_s; t += sampling_dt)
+        {
+            path_vis_t pt;
+            pt.x = eval_poly_at_t(s->n_coef, s->cx, t);
+            pt.y = eval_poly_at_t(s->n_coef, s->cy, t);
+            pt.z = eval_poly_at_t(s->n_coef, s->cz, t);
+            pt.r = 0;
+            pt.g = 0;
+            pt.b = 255;
+            traj.push_back(pt);
+        }
+    }
+
+    generateAndSendPath(render_ch_, traj, PATH_VIS_TRAJECTORY, "GlobalSmoother");
 }
 
 GlobalSmoother::~GlobalSmoother()
