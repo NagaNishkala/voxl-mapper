@@ -10,6 +10,7 @@ target_link_libraries(${TARGET}
     mav_planning_common
     loco_planner
     /usr/lib64/libnlopt.so
+    /usr/lib64/libceres.so
 )
 
 install(
