@@ -100,7 +100,7 @@ private:
      * 
      * @param root the starting point of the RRT tree
      */
-    void deleteNodes(Node *root);
+    void deleteNodes(Node *&root);
 
     /**
      * @brief Cleanup the RRT tree and all associated search structures

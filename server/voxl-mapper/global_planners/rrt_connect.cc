@@ -193,7 +193,7 @@ void RRTConnect::add(Node *q_nearest, Node *q_new)
     nodes_[actual_index].push_back(q_new);
 }
 
-void RRTConnect::deleteNodes(Node *root)
+void RRTConnect::deleteNodes(Node *&root)
 {
     for (size_t i = 0; i < root->children.size(); i++)
     {
@@ -207,7 +207,7 @@ void RRTConnect::cleanupTree()
 {
     if (root_)
         deleteNodes(root_);
-
+ 
     // Clear out the search structure
     for (std::vector<Node *> &vec : nodes_)
     {
