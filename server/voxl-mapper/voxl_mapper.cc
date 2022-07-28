@@ -8,9 +8,6 @@
 #include <fcntl.h>
 #include <unordered_map>
 #include <mav_trajectory_generation/trajectory_sampling.h>
-
-#include "global_planners/rrt_connect.h"
-#include "local_planners/simple_follower.h"
 #include "timing_utils.h"
 
 #define PROCESS_NAME "voxl-mapper"
@@ -51,6 +48,7 @@
 #define CONTROL_COMMANDS (RESET_VIO "," SAVE_MAP "," LOAD_MAP "," CLEAR_MAP "," SLICE_LVL_UPDATE)
 
 #define VIS_UPDATE_RATE 2
+#define MIN_CONFIDENCE 60
 
 namespace voxblox
 {
@@ -199,6 +197,8 @@ namespace voxblox
 
     void TsdfServer::_tof_helper_cb(__attribute__((unused)) int ch, char *data, int bytes, void *context)
     {
+        int64_t start_time;
+        int64_t end_time;
         static int64_t prev_ts = 0;
         // class instance
         TsdfServer *server = (TsdfServer *)context;
@@ -243,7 +243,7 @@ namespace voxblox
         voxblox::Pointcloud ptcloud;
         voxblox::Colors _colors;
 
-        tof_pc_downsample(MPA_TOF_SIZE, tof_data.points, tof_data.confidences, 4.0, 0.15, 4, &ptcloud);
+        tof_pc_downsample(MPA_TOF_SIZE, tof_data.points, tof_data.confidences, MIN_CONFIDENCE, 4.0, voxel_size, 5, &ptcloud);
         _colors.resize(ptcloud.size());
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -268,9 +268,9 @@ namespace voxblox
         voxblox::Transformation refined_vb_tof_to_fixed;
         // voxblox::transformPointcloud(vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
 
-        int64_t start_time = rc_nanos_monotonic_time();
+        start_time = rc_nanos_monotonic_time();
         const size_t num_icp_updates = server->icp_->runICP(server->tsdf_map_->getTsdfLayer(), ptcloud, vb_tof_to_fixed, &refined_vb_tof_to_fixed);
-        int64_t end_time = rc_nanos_monotonic_time();
+        end_time = rc_nanos_monotonic_time();
 
         if (server->en_timing)
         {
@@ -328,14 +328,6 @@ namespace voxblox
         {
             printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
         }
-
-        // clear small sphere (0.2m radius) around our drones pose in the esdf map
-        start_time = rc_nanos_monotonic_time();
-        server->addNewRobotPositionToEsdf(tf_body_wrt_fixed.d[0][3], tf_body_wrt_fixed.d[1][3], tf_body_wrt_fixed.d[2][3]);
-        end_time = rc_nanos_monotonic_time();
-
-        if (server->en_timing)
-            printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
 
         return;
     }
@@ -518,14 +510,6 @@ namespace voxblox
         {
             printf("Integrating Pointcloud Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
         }
-
-        // clear small sphere (0.2m radius) around our drones pose in the esdf map
-        start_time = rc_nanos_monotonic_time();
-        server->addNewRobotPositionToEsdf(tf_body_wrt_fixed.d[0][3], tf_body_wrt_fixed.d[1][3], tf_body_wrt_fixed.d[2][3]);
-        end_time = rc_nanos_monotonic_time();
-
-        if (server->en_timing)
-            printf("Clearing Sphere Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
 
         return;
     }
@@ -755,19 +739,20 @@ namespace voxblox
 
         // basic logic here:
         // receive a costmap_height val from 0-100, scale it within the actual map_bounds (deflated, also needs to be dialed in)
-        float height = upper_bound.z() - 1.0;
-        float dif = (float)(upper_bound.z() - lower_bound.z() - 2.0);
+        float height = upper_bound.z();
+        float dif = (float)(upper_bound.z() - lower_bound.z());
         dif *= (costmap_height / 100);
         height -= dif;
+        height = std::roundf(height / voxel_size) * voxel_size;
 
         if (en_debug)
             printf("Generating CostMap\n");
 
-        pthread_mutex_lock(&esdf_mutex);
         int64_t start_time = rc_nanos_monotonic_time();
+        pthread_mutex_lock(&esdf_mutex);
         create2DCostmap(esdf_map_->getEsdfLayer(), height, cost_map, costmap_updates_only);
-        int64_t end_time = rc_nanos_monotonic_time();
         pthread_mutex_unlock(&esdf_mutex);
+        int64_t end_time = rc_nanos_monotonic_time();
 
         if (en_timing)
         {
@@ -778,12 +763,18 @@ namespace voxblox
 
         static std::vector<point_xyz_i> cost_map_ptc;
 
+        // Send additional data about pointcloud
+        point_xyz_i data;
+        data.x = voxel_size;
+        data.y = esdf_max_distance;
+        cost_map_ptc.push_back(data);
+
         for (auto it : cost_map)
         {
             point_xyz_i pt;
             pt.x = it.first.first;
             pt.y = it.first.second;
-            pt.z = voxel_size; // will be converted to 0, but portal needs to be aware of our map granularity
+            pt.z = height; // will be converted to 0, but portal needs to be aware of our map granularity
             pt.intensity = it.second;
             cost_map_ptc.push_back(pt);
         }
@@ -811,6 +802,56 @@ namespace voxblox
 
         pipe_server_write_point_cloud(COSTMAP_CH, costmap_meta, cost_map_ptc.data());
         cost_map_ptc.clear();
+
+        // // Get gradient
+        // BlockIndexList blocks;
+        // const voxblox::Layer<voxblox::EsdfVoxel> &layer = esdf_map_->getEsdfLayer();
+        // layer.getAllUpdatedBlocks(Update::kMap, &blocks);
+
+        // // Cache layer settings.
+        // size_t vps = layer.voxels_per_side();
+        // size_t num_voxels_per_block = vps * vps * vps;
+
+        // std::vector<point_xyz_i> grad_ptc;
+
+        // // Iterate over all blocks.
+        // for (const BlockIndex &index : blocks)
+        // {
+        //     // Iterate over all voxels in said blocks.
+        //     const Block<EsdfVoxel> &block = layer.getBlockByIndex(index);
+
+        //     for (size_t linear_index = 0; linear_index < num_voxels_per_block; ++linear_index)
+        //     {
+        //         point_xyz_i pt_;
+
+        //         Point coord = block.computeCoordinatesFromLinearIndex(linear_index);
+        //         pt_.x = coord.x();
+        //         pt_.y = coord.y();
+        //         pt_.z = coord.z();
+
+        //         Point3d grad;
+        //         smootherDistanceGradientCallback(esdf_map_.get(), coord.cast<double>(), &grad);
+
+        //         const EsdfVoxel voxel = block.getVoxelByLinearIndex(linear_index);
+        //         if (voxel.distance == 0 || grad == Point3d::Zero() || !voxel.hallucinated) 
+        //             continue;
+
+        //         grad_ptc.push_back(pt_);
+
+        //         pt_.x = grad.cast<float>().x();
+        //         pt_.y = grad.cast<float>().y();
+        //         pt_.z = grad.cast<float>().z();
+        //         grad_ptc.push_back(pt_);
+        //     }
+        // }
+
+        // point_cloud_metadata_t grad_meta;
+        // grad_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
+        // grad_meta.timestamp_ns = 0;
+        // grad_meta.n_points = grad_ptc.size();
+        // grad_meta.format = POINT_CLOUD_FORMAT_FLOAT_XYZC;
+
+        // pipe_server_write_point_cloud(COSTMAP_CH, grad_meta, grad_ptc.data());
     }
 
     void TsdfServer::updateEsdf(bool clear_updated_flag)
@@ -818,11 +859,11 @@ namespace voxblox
         if (en_debug)
             printf("Updating ESDF Map\n");
 
-        pthread_mutex_lock(&esdf_mutex);
         int64_t start_time = rc_nanos_monotonic_time();
+        pthread_mutex_lock(&esdf_mutex);
         esdf_integrator_->updateFromTsdfLayer(clear_updated_flag);
-        int64_t end_time = rc_nanos_monotonic_time();
         pthread_mutex_unlock(&esdf_mutex);
+        int64_t end_time = rc_nanos_monotonic_time();
 
         if (en_timing)
             printf("Updating ESDF Map Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
@@ -836,11 +877,11 @@ namespace voxblox
         constexpr bool only_mesh_updated_blocks = true;
         constexpr bool clear_updated_flag = true;
 
-        pthread_mutex_lock(&tsdf_mutex);
         int64_t start_time = rc_nanos_monotonic_time();
+        pthread_mutex_lock(&tsdf_mutex);
         mesh_integrator_->generateMesh(only_mesh_updated_blocks, clear_updated_flag);
-        int64_t end_time = rc_nanos_monotonic_time();
         pthread_mutex_unlock(&tsdf_mutex);
+        int64_t end_time = rc_nanos_monotonic_time();
 
         if (en_timing)
             printf("Generating Mesh Took: %0.1f ms\n", (end_time - start_time) / 1000000.0);
