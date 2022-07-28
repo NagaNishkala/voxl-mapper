@@ -10,7 +10,6 @@ target_include_directories(${TARGET} PUBLIC
 target_link_libraries(${TARGET}
     mav_planning_msgs
     mav_path_smoothing
-    voxblox_loco_planner
 )
 
 install(
