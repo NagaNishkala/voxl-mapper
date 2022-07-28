@@ -92,8 +92,7 @@ extern float rrt_min_distance;
 extern double rrt_max_runtime_nanoseconds;
 extern double rrt_goal_threshold;
 extern int rrt_prune_iterations;
-extern bool rrt_treat_unknown_as_occupied;
-extern bool rrt_send_map;
+extern bool treat_unknown_as_occupied;
 
 extern int loco_num_segments;
 extern double loco_smoothness_cost_weight;
