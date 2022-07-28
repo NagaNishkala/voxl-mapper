@@ -137,6 +137,8 @@ inline void generateVoxbloxMeshMsg(int ch, MeshLayer* mesh_layer, voxblox_msgs::
         vertex->normal_z = connected_mesh.normals[j].z();
     }
     pipe_server_write(ch, data, meta.size_bytes + sizeof(mesh_metadata_t));
+
+    free(data);
 }
 
 // A hash function used to hash a pair of any kind
@@ -170,6 +172,7 @@ inline void createCostmapFromLayer(const Layer<EsdfVoxel>& layer, const unsigned
         // Iterate over all voxels in said blocks.
         const Block<EsdfVoxel>& block = layer.getBlockByIndex(index);
 
+        // Only keep blocks that are at this height
         Point origin = block.origin();
         if (std::abs(origin(free_plane_index) - free_plane_val) > block.block_size()) {
             continue;
@@ -185,9 +188,10 @@ inline void createCostmapFromLayer(const Layer<EsdfVoxel>& layer, const unsigned
 
             const EsdfVoxel voxel = block.getVoxelByLinearIndex(linear_index);
             if (std::abs(coord(free_plane_index) - free_plane_val) <= block.voxel_size()) {
-                if (voxel.observed) {
+                if (voxel.observed || voxel.hallucinated) {
                     distance = (float)std::abs(voxel.distance);
-                }
+                } 
+                
                 cost_map[curr_coords] = distance;
             }
         }
