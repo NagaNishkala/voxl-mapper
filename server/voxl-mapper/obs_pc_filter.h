@@ -43,7 +43,7 @@
  *
  * @return     0 on success, -1 on failure
  */
-int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, float max_depth, float cell_size, int threshold, voxblox::Pointcloud* out);
+int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t conf_cutoff, float max_depth, float cell_size, int threshold, voxblox::Pointcloud* out);
 
 int dfs_pc_downsample(int n, const float in[][3], float max_depth, float cell_size, int threshold, voxblox::Pointcloud* out);
 
