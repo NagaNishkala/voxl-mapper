@@ -64,11 +64,11 @@ private:
 
     void plannerThread();
     bool getInitialPlan();
-    bool runPlanner(Point3f start_pose, Point3fVector &target_points, mav_trajectory_generation::Trajectory &trajectory);
+    bool runPlanner(const Point3f &start_pose, Point3fVector &target_points, mav_trajectory_generation::Trajectory &trajectory);
     bool runSmoother(const Point3fVector &target_points,
                      mav_trajectory_generation::Trajectory &trajectory);
     bool sendTrajectory(
-        const mav_trajectory_generation::Trajectory &trajectory, int split_id, double split_time, bool first_plan);
+        const mav_trajectory_generation::Trajectory &trajectory, int split_id, double split_time, bool first_plan = false);
     void visualizePath(const Point3fVector &target_points);
 
     bool computeSplitPointDetails(Point3f &start_pose, int &split_id, double &split_time);
@@ -77,6 +77,8 @@ private:
     bool isBetween(Point3f a, Point3f b, Point3f c);
 
     void pruneAStarPath(std::vector<Node *> &path);
+
+    Point3f computeGoalPosition(const Point3f& start_pos);
 
     Point3fVector waypoints_;
     mav_planning::LocoSmoother loco_smoother_;
@@ -87,12 +89,12 @@ private:
     std::thread planning_thread_;
     std::atomic<bool> running_;
 
-    int cur_waypoint_;
-
     trajectory_t current_traj_;
 
     Point3f start_vel;
     Point3f start_acc;
+
+    int next_segment_id_;
 
     int plan_ch_;
     int render_ch_;
