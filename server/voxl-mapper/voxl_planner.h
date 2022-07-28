@@ -30,7 +30,7 @@ public:
     bool planTo(const Point3f &start_pos, const Point3f &end_pos);
     void startFollowPath();
     void stopFollowPath();
-    void sendEstopCmd();
+    void sendStopCmd();
     void resetEstop();
 
 private:

@@ -118,13 +118,13 @@ void VoxlPlanner::stopFollowPath()
     local_planner_->stop();
 }
 
-void VoxlPlanner::sendEstopCmd()
+void VoxlPlanner::sendStopCmd()
 {
-    trajectory_t estop;
-    estop.magic_number = TRAJECTORY_MAGIC_NUMBER;
-    estop.traj_command = TRAJ_CMD_ESTOP;
-    pipe_server_write(plan_ch_, &estop, sizeof(estop));
-    fprintf(stderr, "Planner sent Estop command.\n");
+    trajectory_t stop;
+    stop.magic_number = TRAJECTORY_MAGIC_NUMBER;
+    stop.traj_command = TRAJ_CMD_STOP;
+    pipe_server_write(plan_ch_, &stop, sizeof(stop));
+    fprintf(stderr, "Planner sent stop command.\n");
 }
 
 void VoxlPlanner::resetEstop()
@@ -189,9 +189,8 @@ void VoxlPlanner::handlePlanCmd(char *msg, VoxlPlanner *planner)
         start_pose << tf_body_wrt_fixed.d[0][3], tf_body_wrt_fixed.d[1][3], tf_body_wrt_fixed.d[2][3];
         goal_pose << 0.0, 0.0, -1.5;
 
-        mapper->addNewRobotPositionToEsdf(start_pose.x(), start_pose.y(), start_pose.z());
         mapper->updateEsdf(true);
-        usleep(100000);
+        mapper->addNewRobotPositionToEsdf(start_pose.x(), start_pose.y(), start_pose.z());
 
         fprintf(stderr, "Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
         fprintf(stderr, "Using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
@@ -225,8 +224,8 @@ void VoxlPlanner::handlePlanCmd(char *msg, VoxlPlanner *planner)
 
         goal_pose << x, y, z;
 
-        mapper->addNewRobotPositionToEsdf(start_pose.x(), start_pose.y(), start_pose.z());
         mapper->updateEsdf(true);
+        mapper->addNewRobotPositionToEsdf(start_pose.x(), start_pose.y(), start_pose.z());
 
         printf("Using start pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", start_pose.x(), start_pose.y(), start_pose.z());
         printf("Using goal pose of: x: %6.2f, y: %6.2f, z: %6.2f\n", goal_pose.x(), goal_pose.y(), goal_pose.z());
@@ -248,8 +247,7 @@ void VoxlPlanner::handlePlanCmd(char *msg, VoxlPlanner *planner)
         // as a reply.
         fprintf(stderr, "Stop following path request received\n");
         planner->stopFollowPath();
-        planner->sendEstopCmd();
-        planner->resetEstop();
+        planner->sendStopCmd();
     }
 }
 
