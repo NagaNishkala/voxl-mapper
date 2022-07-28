@@ -1,5 +1,5 @@
 Package: voxl-mapper
-Version: 0.0.6
+Version: 0.0.7
 Section: base
 Priority: optional
 Architecture: arm64
