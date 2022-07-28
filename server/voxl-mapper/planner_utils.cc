@@ -136,10 +136,10 @@ bool convertMavTrajectoryToVoxlTrajectory(const mav_trajectory_generation::Traje
 float getMapDistance(const voxblox::EsdfMap *map, const Point3f &position)
 {
     float dist = 0.0;
-    if (!(map->getDistanceAtPosition(position, false, &dist)))
+    if (!(map->getDistanceAtPosition(position, &dist, false, true)))
     {
         // if we cannot identify a voxel close enough to this location WITHOUT interpolation, it is unknown so reject it
-        if (rrt_treat_unknown_as_occupied)
+        if (treat_unknown_as_occupied)
             dist = 0.0;
         else
             dist = esdf_default_distance;
@@ -150,12 +150,16 @@ float getMapDistance(const voxblox::EsdfMap *map, const Point3f &position)
 
 double smootherDistanceGradientCallback(const voxblox::EsdfMap *map, const Point3d &position, Point3d *gradient)
 {
-    double distance = 0.0;
-    if (!(map->getDistanceAndGradientAtPosition(position, false, &distance, gradient)))
+    float distance = 0.0;
+    Point3f grad_fp = Point3f::Zero();
+    if (!(map->getDistanceAndGradientAtPosition(position.cast<float>(), &distance, &grad_fp, false, true)))
     {
         return 0.0;
     }
-    return distance;
+
+    *gradient = grad_fp.cast<double>();
+
+    return static_cast<float>(distance);
 }
 
 bool smootherCollisionCallback(const voxblox::EsdfMap *map, const Point3d &pos)
