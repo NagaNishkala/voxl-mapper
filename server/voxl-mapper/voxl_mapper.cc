@@ -241,9 +241,10 @@ namespace voxblox
 
         // setup our voxblox structs for pointcloud and colors
         voxblox::Pointcloud ptcloud;
+        std::vector<uint8_t> confidences;
         voxblox::Colors _colors;
 
-        tof_pc_downsample(MPA_TOF_SIZE, tof_data.points, tof_data.confidences, MIN_CONFIDENCE, 4.0, voxel_size, 5, &ptcloud);
+        tof_pc_downsample(MPA_TOF_SIZE, tof_data.points, tof_data.confidences, MIN_CONFIDENCE, 4.0, voxel_size, 3, &ptcloud, &confidences);
         _colors.resize(ptcloud.size());
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -266,18 +267,18 @@ namespace voxblox
 
         voxblox::Pointcloud _pub_ptcloud;
         voxblox::Transformation refined_vb_tof_to_fixed;
-        // voxblox::transformPointcloud(vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
+        voxblox::transformPointcloud(vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
 
-        start_time = rc_nanos_monotonic_time();
-        const size_t num_icp_updates = server->icp_->runICP(server->tsdf_map_->getTsdfLayer(), ptcloud, vb_tof_to_fixed, &refined_vb_tof_to_fixed);
-        end_time = rc_nanos_monotonic_time();
+        // start_time = rc_nanos_monotonic_time();
+        // const size_t num_icp_updates = server->icp_->runICP(server->tsdf_map_->getTsdfLayer(), ptcloud, vb_tof_to_fixed, &refined_vb_tof_to_fixed);
+        // end_time = rc_nanos_monotonic_time();
 
-        if (server->en_timing)
-        {
-            printf("ICP Took: %0.1f ms for %d iterations\n", (end_time - start_time) / 1000000.0, num_icp_updates);
-        }
+        // if (server->en_timing)
+        // {
+        //     printf("ICP Took: %0.1f ms for %d iterations\n", (end_time - start_time) / 1000000.0, num_icp_updates);
+        // }
 
-        voxblox::transformPointcloud(refined_vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
+        // voxblox::transformPointcloud(refined_vb_tof_to_fixed, ptcloud, &_pub_ptcloud); // transform it to what we will be inserting
 
         point_cloud_metadata_t aligned_ptc_meta;
         aligned_ptc_meta.magic_number = POINT_CLOUD_MAGIC_NUMBER;
@@ -300,16 +301,9 @@ namespace voxblox
 
         for (size_t i = 0; i < ptcloud.size(); i++)
         {
-            float height = _pub_ptcloud[i].z() / RAINBOW_REPEAT_DIST;
+            float conf = confidences[i] / 255.0f;
 
-            // floating point modulus
-            while (height > 1.0f)
-                height -= 1.0f;
-
-            while (height < 0.0f)
-                height += 1.0f;
-
-            float a = height * 5;
+            float a = conf * 5;
             int color0 = std::floor(a);
             int color1 = std::ceil(a);
             float t = a - color0;

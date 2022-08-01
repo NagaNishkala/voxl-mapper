@@ -40,7 +40,7 @@
 
 #include "obs_pc_filter.h"
 
-int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t conf_cutoff, float max_depth, float cell_size, int threshold, voxblox::Pointcloud* out)
+int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t conf_cutoff, float max_depth, float cell_size, int threshold, voxblox::Pointcloud* out, std::vector<uint8_t>* out_conf)
 {
 	// sanity checks
 	if(unlikely(in==NULL)){
@@ -81,6 +81,7 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 	// a majority of "zero" points were no tof/dfs data exists
 	int n_valid_points = 0;
 	float* valid_points = (float*)malloc(n*3*sizeof(float));
+	uint8_t* valid_confs = (uint8_t*)malloc(n*sizeof(uint8_t));
 	if(valid_points==NULL){
 		fprintf(stderr, "ERROR in %s, failed to malloc buffer\n", __FUNCTION__);
 		return -1;
@@ -110,6 +111,7 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 			valid_points[p]   = x;
 			valid_points[p+1] = y;
 			valid_points[p+2] = z;
+			valid_confs[n_valid_points] = conf[i];
 			n_valid_points++;
 		}
 	}
@@ -132,6 +134,8 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 			valid_points[p]   = x;
 			valid_points[p+1] = y;
 			valid_points[p+2] = z;
+
+			valid_confs[n_valid_points] = conf[i];
 			n_valid_points++;
 		}
 	}
@@ -143,6 +147,7 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 	// not enough points to warrent continuing
 	if(n_valid_points<threshold){
 		free(valid_points);
+		free(valid_confs);
 		return 0;
 	}
 
@@ -161,6 +166,7 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 					(double)x_min, (double)y_min, (double)z_min, \
 					(double)x_max, (double)y_max, (double)z_max);
 		free(valid_points); // free old memory, it's still allocated!
+		free(valid_confs);
 		return -1;
 	}
 
@@ -227,6 +233,7 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 
 	int n_out = 0; // output data points
 	float output[map1_pts*3];
+	uint8_t output_conf[map1_pts];
 
 	for(int p=0;p<map1_pts;p++){
 		// grab the indices in map1 from record
@@ -258,6 +265,7 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 			output[(n_out*3)]   = valid_points[idx2];
 			output[(n_out*3)+1] = valid_points[idx2+1];
 			output[(n_out*3)+2] = valid_points[idx2+2];
+			output_conf[n_out] = valid_confs[(int)(idx2 / 3)];
 			//fprintf(stderr,"accepted point %6.2f %6.2f %6.2f\n", (double)output[(n_out*3)], (double)output[(n_out*3)+1], (double)output[(n_out*3)+2]);
 			n_out++;
 		}
@@ -265,6 +273,7 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 
 	// done with the dynmaically allocated data now
 	free(valid_points);
+	free(valid_confs);
 	free(map1);
 	free(map2);
 
@@ -274,7 +283,9 @@ int tof_pc_downsample(int n, const float in[][3], const uint8_t* conf, uint8_t c
 
 	if(n_out>0){
         out->resize(n_out);
+		out_conf->resize(n_out);
 		memcpy(out->data(), output, n_out*3*sizeof(float));
+		memcpy(out_conf->data(), output_conf, n_out*sizeof(uint8_t));
 	}
 
 	return 0;

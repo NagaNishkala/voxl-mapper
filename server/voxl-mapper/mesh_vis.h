@@ -55,16 +55,57 @@ namespace voxblox {
 enum ColorMode {
     kColor = 0,
     kHeight,
-    kNormals,
-    kGray,
-    kLambert,
-    kLambertColor
+    kNormals
 };
 
-//TODO: Eventually make this not all just gray
-inline void getVertexColor(mesh_vertex_t* vertex) {
+constexpr float heat[] =
+    {
+        1.0, 0.0, 0.0,
+        1.0, 1.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 1.0, 1.0,
+        0.0, 0.0, 1.0
+        };
 
-    vertex->r = vertex->g = vertex->b = 128;
+#define COLOR_MODE "height"
+
+//TODO: Eventually make this not all just gray
+inline void getVertexColor(mesh_vertex_t *vertex, const voxblox::Mesh &mesh, const int index, const ColorMode color_mode) {
+
+    switch (color_mode)
+    {
+    case ColorMode::kColor: {
+
+        vertex->r = mesh.colors[index].r;
+        vertex->g = mesh.colors[index].g;
+        vertex->b = mesh.colors[index].b;
+        break;
+    }
+
+    case ColorMode::kHeight: {
+
+        // Interpolate the colors based on the height
+        float height = -mesh.vertices[index].z() / 3.0f;
+        float a = height * 5.0f;
+        int color0 = std::floor(a);
+        int color1 = std::ceil(a);
+        float t = a - color0;
+
+        vertex->r = 255 * ((1 - t) * heat[color0 * 3] + t * heat[color1 * 3]);
+        vertex->g = 255 * ((1 - t) * heat[color0 * 3 + 1] + t * heat[color1 * 3 + 1]);
+        vertex->b = 255 * ((1 - t) * heat[color0 * 3 + 2] + t * heat[color1 * 3 + 2]);
+        break;
+    }
+
+    case ColorMode::kNormals: {
+        
+        // Normals should be in scale -1 to 1, so shift to 0 - 255
+        vertex->r = 255 * (1 - mesh.normals[index].x() * 0.5f + 0.5f);
+        vertex->g = 255 * (1 - mesh.normals[index].y() * 0.5f + 0.5f);
+        vertex->b = 255 * (1 - mesh.normals[index].z() * 0.5f + 0.5f);
+        break;
+    }
+    }
 
 }
 
@@ -78,12 +119,8 @@ inline ColorMode getColorModeFromString(const std::string &color_mode_string) {
             return ColorMode::kHeight;
         } else if (color_mode_string == "normals") {
             return ColorMode::kNormals;
-        } else if (color_mode_string == "lambert") {
-            return ColorMode::kLambert;
-        } else if (color_mode_string == "lambert_color") {
-            return ColorMode::kLambertColor;
-        } else {  // Default case is gray.
-            return ColorMode::kGray;
+        } else {  // Default case is height.
+            return ColorMode::kHeight;
         }
     }
 }
@@ -115,6 +152,7 @@ inline void generateVoxbloxMeshMsg(int ch, MeshLayer* mesh_layer, voxblox_msgs::
     memcpy (data, &meta, sizeof(mesh_metadata_t));
     char *current = (char *)data + sizeof(mesh_metadata_t);
 
+    ColorMode color_mode = getColorModeFromString(COLOR_MODE);
 
     for (size_t j = 0; j < connected_mesh.vertices.size(); j++) {
 
@@ -127,9 +165,7 @@ inline void generateVoxbloxMeshMsg(int ch, MeshLayer* mesh_layer, voxblox_msgs::
         vertex->z = connected_mesh.vertices[j].z();
 
         // push up our colors
-        vertex->r = connected_mesh.colors[j].r;
-        vertex->g = connected_mesh.colors[j].g;
-        vertex->b = connected_mesh.colors[j].b;
+        getVertexColor(vertex, connected_mesh, j, color_mode);
 
         // push up our normals
         vertex->normal_x = connected_mesh.normals[j].x();
