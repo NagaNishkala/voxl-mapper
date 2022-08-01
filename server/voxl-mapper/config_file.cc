@@ -41,9 +41,12 @@
  * This file contains configuration that's specific to voxl-mapper.\n\
  * \n\
  * RRT Parameters\n\
+ * rrt_min_distance:           			  Minimum edge distance in the RRT. Should be larger than voxel size otherwise\n\
+ * 										  there will be wasted computation. Default: 0.2 \n\
  * rrt_max_runtime_nanoseconds:           Maximum amount of time allowed for the RRT planner to run. Default: 1000000000 \n\
  * rrt_goal_threshold:                    Minimum distance to goal before a point is considered to be at the goal. Default: 0.05m \n\
  * rrt_prune_iterations:                  Number of iterations to run pruning on the RRT path for. Default: 100 \n\
+ * rrt_send_tree:		                  Whether to send the RRT tree for visualization in portal. Default: false \n\
  * treat_unknown_as_occupied:         	  Whether to treat unknown cells as occupied. Default: true \n\
  * \n\
  * Smoother Parameters\n\
@@ -126,6 +129,7 @@ float rrt_min_distance;
 double rrt_max_runtime_nanoseconds;
 double rrt_goal_threshold;
 int rrt_prune_iterations;
+int rrt_send_tree;
 bool treat_unknown_as_occupied;
 
 bool loco_resample_trajectory;
@@ -311,7 +315,8 @@ int config_file_print(void){
     printf("rrt_max_runtime_nanoseconds:      %0.3f\n", rrt_max_runtime_nanoseconds);
     printf("rrt_goal_threshold:		          %0.3f\n", rrt_goal_threshold);
     printf("rrt_prune_iterations:		      %d\n", rrt_prune_iterations);
-    printf("treat_unknown_as_occupied:    %s\n", treat_unknown_as_occupied ? "true" : "false");
+    printf("rrt_send_tree:				      %s\n", rrt_send_tree ? "true" : "false");
+    printf("treat_unknown_as_occupied:    	  %s\n", treat_unknown_as_occupied ? "true" : "false");
     printf("============================LOCO==================================\n");
     printf("loco_num_segments:                %d\n", loco_num_segments);
     printf("loco_smoothness_cost_weight:      %0.3f\n", loco_smoothness_cost_weight);
@@ -388,6 +393,7 @@ int config_file_read(void)
 	json_fetch_double_with_default(parent, "rrt_max_runtime_nanoseconds", &rrt_max_runtime_nanoseconds, 1000000000);
 	json_fetch_double_with_default(parent, "rrt_goal_threshold", &rrt_goal_threshold, 0.05);
 	json_fetch_int_with_default(parent, "rrt_prune_iterations", &rrt_prune_iterations, 100);
+	json_fetch_bool_with_default(parent, "rrt_send_tree", (int*)&rrt_send_tree, 0);
 	json_fetch_bool_with_default(parent, "treat_unknown_as_occupied", (int*)&treat_unknown_as_occupied, 1);
 
     json_fetch_int_with_default(parent, "loco_num_segments", &loco_num_segments, 10);

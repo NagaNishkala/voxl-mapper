@@ -11,6 +11,8 @@
 
 #define PATH_VIS_LINE 0       // Waypoints joined by a line
 #define PATH_VIS_TRAJECTORY 1 // Polynomial described by a set of samples along path
+#define PATH_VIS_TREE 2       // RRT tree
+#define PATH_VIS_POINTS 3     // Points
 
 // struct containing all relevant metadata for path visualization
 typedef struct path_vis_meta_t
@@ -31,7 +33,7 @@ typedef struct path_vis_t
     uint8_t b;
 } __attribute__((packed)) path_vis_t;
 
-inline void generateAndSendPath(int ch, std::vector<path_vis_t> points, uint32_t format, std::string name)
+inline void generateAndSendPath(int ch, const std::vector<path_vis_t> &points, uint32_t format, std::string name)
 {
     static path_vis_meta_t meta;
 

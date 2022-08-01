@@ -21,7 +21,7 @@ void convertPointsToSmootherFormat(const Point3fVector &points, mav_msgs::EigenT
 bool convertMavTrajectoryToVoxlTrajectory(const mav_trajectory_generation::Trajectory &trajectory, trajectory_t &out);
 
 // Map Helper functions
-float getMapDistance(const voxblox::EsdfMap *map, const Point3f &position);
+float getMapDistance(const voxblox::EsdfMap *map, const Point3f &position, bool use_hallucinated = false);
 
 bool detectCollision(const voxblox::EsdfMap *map, const Point3f &pos);
 

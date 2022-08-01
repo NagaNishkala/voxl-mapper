@@ -133,10 +133,10 @@ bool convertMavTrajectoryToVoxlTrajectory(const mav_trajectory_generation::Traje
     return true;
 }
 
-float getMapDistance(const voxblox::EsdfMap *map, const Point3f &position)
+float getMapDistance(const voxblox::EsdfMap *map, const Point3f &position, bool use_hallucinated)
 {
     float dist = 0.0;
-    if (!(map->getDistanceAtPosition(position, &dist, false, true)))
+    if (!(map->getDistanceAtPosition(position, &dist, false, use_hallucinated)))
     {
         // if we cannot identify a voxel close enough to this location WITHOUT interpolation, it is unknown so reject it
         if (treat_unknown_as_occupied)
@@ -169,7 +169,10 @@ bool smootherCollisionCallback(const voxblox::EsdfMap *map, const Point3d &pos)
 
 bool detectCollision(const voxblox::EsdfMap *map, const Point3f &pos)
 {
-    return getMapDistance(map, pos) <= robot_radius;
+    if (treat_unknown_as_occupied)
+        return getMapDistance(map, pos, false) <= robot_radius;
+    else
+        return getMapDistance(map, pos, true) <= robot_radius;
 }
 
 bool detectCollisionEdge(const voxblox::EsdfMap *map, const Point3f &start, const Point3f &end, float step_size)

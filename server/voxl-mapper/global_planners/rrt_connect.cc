@@ -17,10 +17,14 @@ RRTConnect::RRTConnect(std::shared_ptr<voxblox::EsdfMap> esdf_map, int vis_chann
     : esdf_map_(esdf_map),
       root_(nullptr),
       node_counter_(-2), // Set to -2 so that -2 is start and -1 is goal
-      vis_channel_(vis_channel)
+      vis_channel_(vis_channel),
+      last_create_idx_(0)
 {
     // Set the random seed
     srand(time(nullptr));
+
+    lower_bound_ = Point3f::Zero();
+    upper_bound_ = Point3f::Zero();
 }
 
 bool RRTConnect::computeMapBounds()
@@ -31,31 +35,16 @@ bool RRTConnect::computeMapBounds()
         return false;
     }
 
-    voxblox::utils::computeMapBoundsFromLayer(*esdf_map_->getEsdfLayerPtr(), &lower_bound_, &upper_bound_);
+    voxblox::utils::computeObservedMapBoundsFromLayer<voxblox::EsdfVoxel>(*esdf_map_->getEsdfLayerPtr(), &lower_bound_, &upper_bound_);
 
     printf("Map Bounds:\n");
     printf("Lower-> x:%6.2f, y:%6.2f, z:%6.2f\n", (double)lower_bound_.x(), (double)lower_bound_.y(), (double)lower_bound_.z());
     printf("Upper-> x:%6.2f, y:%6.2f, z:%6.2f\n", (double)upper_bound_.x(), (double)upper_bound_.y(), (double)upper_bound_.z());
 
-    ind_lower_[0] = (double)lower_bound_.x() / ((double)voxels_per_side * (double)voxel_size);
-    ind_lower_[1] = (double)lower_bound_.y() / ((double)voxels_per_side * (double)voxel_size);
-    ind_lower_[2] = (double)lower_bound_.z() / ((double)voxels_per_side * (double)voxel_size);
-
-    double ind_upper[3] = {
-        (double)upper_bound_.x() / ((double)voxels_per_side * (double)voxel_size),
-        (double)upper_bound_.y() / ((double)voxels_per_side * (double)voxel_size),
-        (double)upper_bound_.z() / ((double)voxels_per_side * (double)voxel_size)};
-
-    d_x_ = std::abs(ind_lower_[0] - ind_upper[0]);
-    d_y_ = std::abs(ind_lower_[1] - ind_upper[1]);
-    d_z_ = std::abs(ind_lower_[2] - ind_upper[2]);
-
-    // nodes max size will then be dx + (dy * dx) + (dz * dy * dz)
-    nodes_.resize(d_x_ + (d_y_ * d_x_) + (d_z_ * d_y_ * d_x_));
     return true;
 }
 
-Node *RRTConnect::createNewNode(const Point3f &position, Node *parent)
+RRTConnect::Node *RRTConnect::createNewNode(const Point3f &position, Node *parent)
 {
     Node *new_node = new Node{.position = position, .parent = parent, .children = std::vector<Node *>(), .id = node_counter_};
     node_counter_++;
@@ -66,7 +55,7 @@ Node *RRTConnect::createNewNode(const Point3f &position, Node *parent)
     return new_node;
 }
 
-Node *RRTConnect::createRandomNode()
+RRTConnect::Node *RRTConnect::createRandomNode()
 {
     float x = ((upper_bound_.x() - lower_bound_.x()) * (float)rand() / (float)RAND_MAX) + lower_bound_.x();
     float y = ((upper_bound_.y() - lower_bound_.y()) * (float)rand() / (float)RAND_MAX) + lower_bound_.y();
@@ -77,111 +66,50 @@ Node *RRTConnect::createRandomNode()
     return createNewNode(rand_pt, nullptr);
 }
 
-std::pair<Node *, double> RRTConnect::findNearest(const Point3f &point)
+std::pair<RRTConnect::Node *, float> RRTConnect::findNearest(const Point3f &point)
 {
-    double min_dist = DBL_MAX;
     Node *closest = nullptr;
+    float distance = FLT_MAX;
 
-    int actual_index = flatIndexfromPoint(point);
-
-    if (!nodes_[actual_index].empty())
+    // 3000 was chosen because it was the point at which the number of attempts stopped increasing
+    // TODO: A smarter way would be to make this adaptive i.e. start at some lowish number and then
+    // check when the time to search becomes greater than the time to create the octree
+    if (points_.size() - last_create_idx_ > 3000)
     {
+        octree_.initialize(points_);
 
-        for (size_t i = 0; i < nodes_[actual_index].size(); i++)
+        last_create_idx_ = points_.size() - 1;
+
+        int32_t idx = octree_.findNeighbor<unibn::L2Distance<Point3f>>(point);
+
+        closest = nodes_[idx];
+        distance = (point - nodes_[idx]->position).norm();
+    }
+    else
+    {
+        int32_t idx = octree_.findNeighbor<unibn::L2Distance<Point3f>>(point);
+
+        if (idx > 0)
         {
-            // TODO: Is this needed?
-            if (nodes_[actual_index][i] == nullptr)
-                continue;
+            closest = nodes_[idx];
+            distance = (point - nodes_[idx]->position).squaredNorm();
+        }
 
-            double dist = distance(point, nodes_[actual_index][i]->position);
+        for (int i = last_create_idx_; i < points_.size(); i++)
+        {
+            float d = (points_[i] - point).squaredNorm();
 
-            if (dist < min_dist)
+            if (d < distance)
             {
-                min_dist = dist;
-                closest = nodes_[actual_index][i];
+                distance = d;
+                closest = nodes_[i];
             }
         }
+
+        distance = std::sqrt(distance);
     }
 
-    if (closest == nullptr)
-    {
-        actual_index = binSelect(actual_index);
-        if (!nodes_[actual_index].empty())
-        {
-            for (size_t i = 0; i < nodes_[actual_index].size(); i++)
-            {
-                double dist = distance(point, nodes_[actual_index][i]->position);
-                if (dist < min_dist)
-                {
-                    min_dist = dist;
-                    closest = nodes_[actual_index][i];
-                }
-            }
-        }
-    }
-
-    return std::make_pair(closest, min_dist);
-}
-
-int RRTConnect::binSelect(int index)
-{
-    if (!nodes_[index].empty())
-        return index;
-
-    // check left/right, forward/back, up/down by 1. if those all fail, keep looking around it
-    int x_offset = 1;
-    int y_offset = d_x_;
-    int z_offset = d_y_ * d_x_;
-
-    // independent checks
-    bool l_x, l_y, l_z, r_x, r_y, r_z;
-    l_x = l_y = l_z = r_x = r_y = r_z = true;
-
-    while (l_x || l_y || l_z || r_x || r_y || r_z)
-    {
-
-        if (l_x && index - x_offset < 0)
-            l_x = false;
-        if (r_x && index + x_offset >= nodes_.size())
-            r_x = false;
-
-        if (l_y && index - y_offset < 0)
-            l_y = false;
-        if (r_y && index + y_offset >= nodes_.size())
-            r_y = false;
-
-        if (l_z && index - z_offset < 0)
-            l_z = false;
-        if (r_z && index + z_offset >= nodes_.size())
-            r_z = false;
-
-        if (r_x && !nodes_.at(index + x_offset).empty())
-            return index + x_offset;
-        if (l_x && !nodes_.at(index - x_offset).empty())
-            return index - x_offset;
-
-        if (r_y && !nodes_.at(index + y_offset).empty())
-            return index + y_offset;
-        if (l_y && !nodes_.at(index - y_offset).empty())
-            return index - y_offset;
-
-        if (r_z && !nodes_.at(index + z_offset).empty())
-            return index + z_offset;
-        if (l_z && !nodes_.at(index - z_offset).empty())
-            return index - z_offset;
-
-        x_offset += 1;
-        y_offset += d_x_;
-        z_offset += d_y_ * d_x_;
-    }
-    // default. if we fail, return where the root is
-    return 0;
-}
-
-int RRTConnect::flatIndexfromPoint(const Point3f &point)
-{
-    voxblox::BlockIndex bi = esdf_map_->getEsdfLayerPtr()->computeBlockIndexFromCoordinates(point.cast<float>());
-    return (bi.x() - ind_lower_[0]) + (bi.y() - ind_lower_[1] * d_x_) + ((bi.z() - ind_lower_[2]) * d_y_ * d_x_);
+    return std::make_pair(closest, distance);
 }
 
 void RRTConnect::add(Node *q_nearest, Node *q_new)
@@ -189,8 +117,9 @@ void RRTConnect::add(Node *q_nearest, Node *q_new)
     q_new->parent = q_nearest;
     q_nearest->children.push_back(q_new);
 
-    int actual_index = flatIndexfromPoint(q_new->position);
-    nodes_[actual_index].push_back(q_new);
+    nodes_.push_back(q_new);
+
+    points_.push_back(q_new->position);
 }
 
 void RRTConnect::deleteNodes(Node *&root)
@@ -207,14 +136,9 @@ void RRTConnect::cleanupTree()
 {
     if (root_)
         deleteNodes(root_);
- 
-    // Clear out the search structure
-    for (std::vector<Node *> &vec : nodes_)
-    {
-        vec.clear();
-    }
 
     nodes_.clear();
+    points_.clear();
     node_counter_ = -2;
 }
 
@@ -292,18 +216,18 @@ void RRTConnect::pruneRRTPath(std::vector<Node *> &rrt_path)
     // Level 2 pruning
     int p = 0;
     int p_next = 1;
-    std::vector<Node*> new_path;
+    std::vector<Node *> new_path;
     new_path.reserve(rrt_path.size());
     new_path.push_back(rrt_path[0]);
 
     while (p != rrt_path.size() - 1)
     {
-        Node* node_p = rrt_path[p];
+        Node *node_p = rrt_path[p];
 
         while (p_next + 1 < rrt_path.size() - 1)
         {
-            Node* node_p_next = rrt_path[p_next + 1];
-            if(detectCollisionEdge(esdf_map_.get(), node_p->position, node_p_next->position))
+            Node *node_p_next = rrt_path[p_next + 1];
+            if (detectCollisionEdge(esdf_map_.get(), node_p->position, node_p_next->position))
             {
                 break;
             }
@@ -350,6 +274,48 @@ void RRTConnect::visualizePath(const Point3fVector &waypoints)
     }
 
     generateAndSendPath(vis_channel_, rrt_path, PATH_VIS_LINE, "RRT Waypoints");
+    usleep(1e6);
+
+    // Note: The tree cannot be deleted for this to work
+    // (i.e. cleanupTree() should not be called before this line runs)
+    if (rrt_send_tree)
+    {
+        std::vector<path_vis_t> rrt_tree;
+        std::vector<Node *> stack;
+        stack.push_back(root_);
+
+        while (!stack.empty())
+        {
+            Node *root = stack.back();
+            stack.pop_back();
+
+            path_vis_t root_pt;
+            root_pt.x = root->position.x();
+            root_pt.y = root->position.y();
+            root_pt.z = root->position.z();
+            root_pt.r = 0;
+            root_pt.g = 255;
+            root_pt.b = 0;
+
+            for (int i = 0; i < root->children.size(); i++)
+            {
+                stack.push_back(root->children[i]);
+                Node *child = root->children[i];
+
+                path_vis_t pt;
+                pt.x = child->position.x();
+                pt.y = child->position.y();
+                pt.z = child->position.z();
+                pt.r = 255;
+                pt.g = 0;
+                pt.b = 0;
+                rrt_tree.push_back(root_pt);
+                rrt_tree.push_back(pt);
+            }
+        }
+
+        generateAndSendPath(vis_channel_, rrt_tree, PATH_VIS_TREE, "RRT Tree");
+    }
 }
 
 bool RRTConnect::fixTree(Node *new_root)
@@ -398,7 +364,9 @@ bool RRTConnect::fixTree(Node *new_root)
 
 bool RRTConnect::runRRT(const Point3f &start_pos, const Point3f &end_pos, Point3fVector &waypoints)
 {
+    int64_t a = rc_nanos_monotonic_time();
     computeMapBounds();
+    fprintf(stderr, "compute = %f\n", (double)(rc_nanos_monotonic_time() - a) / 1e9);
 
     // Setup start and end nodes
     Node *q_start = createNewNode(start_pos, nullptr);
@@ -429,21 +397,21 @@ bool RRTConnect::runRRT(const Point3f &start_pos, const Point3f &end_pos, Point3
     std::vector<Node *> rrt_path;
 
     // Insert start into search structure
-    int start_node_index = flatIndexfromPoint(q_start->position);
-    nodes_[start_node_index].push_back(q_start);
+    nodes_.push_back(q_start);
+    points_.push_back(start_pos);
 
     uint64_t start_time = rc_nanos_monotonic_time();
     int attempts = 0;
     Node *q_rand = nullptr;
     Node *q_connect = nullptr;
     Node *q_near = nullptr;
-    double dist = 0;
+    float dist = 0;
     bool collision_found;
 
     while (rrt_max_runtime_nanoseconds == -1 || start_time + rrt_max_runtime_nanoseconds > rc_nanos_monotonic_time())
     {
         // Get random node or use goal
-        if (attempts % 10 == 0)
+        if (attempts % 50 == 0)
             q_rand = q_goal;
         else
             q_rand = createRandomNode();
@@ -535,7 +503,6 @@ bool RRTConnect::runRRT(const Point3f &start_pos, const Point3f &end_pos, Point3
 
     // Cleanup extra nodes created due to pruning
     cleanupPruning();
-    cleanupTree(); // TODO: Remove once replanning is finished
 
     return true;
 }
@@ -589,6 +556,8 @@ bool RRTConnect::createPlan(const Point3f &start_pos, const Point3f &end_pos, Po
 
         visualizePath(waypoints);
     }
+
+    cleanupTree(); // TODO: Remove once replanning is finished
 
     return success;
 }
