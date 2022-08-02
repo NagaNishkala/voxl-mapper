@@ -61,3 +61,4 @@ case "$1" in
 		exit 1
 		;;
 esac
+trap 'err=$?; echo >&2 "Exiting on error $err"; exit $err' ERR
