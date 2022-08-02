@@ -989,7 +989,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         start_pose << server->curr_pose.x(), server->curr_pose.y(), server->curr_pose.z();
 
-        char* goal_ptr;
+        /*char* goal_ptr;
         goal_ptr = strtok (string, ":");
         goal_ptr = strtok (NULL, ":");
 
@@ -998,7 +998,34 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         double x = std::stod (goal_str,&sz);
         double y = std::stod (goal_str.substr(sz+1));
-        double z = start_pose.z();
+        double z = start_pose.z();*/
+
+        char* goal_ptr;
+        goal_ptr = strtok (string, " ");
+
+        int i=0;
+        double x=0.0;
+        double y=0.0;
+        double z=0.0;
+        
+        while( goal_ptr != NULL ) {
+
+        if(i==1)
+        {x = atof(goal_ptr);}
+        
+        if(i==2)
+        {y = atof(goal_ptr);}
+        
+        if(i==3)
+        {z = atof(goal_ptr);}
+        
+        //printf( " %s\n", goal_ptr );
+        goal_ptr = strtok(NULL, " ");
+        i=i+1;
+
+        }
+        
+        fprintf("x: %f, y: %f, z: %f",x,y,z);
 
         goal_pose << x, y, z;
 
