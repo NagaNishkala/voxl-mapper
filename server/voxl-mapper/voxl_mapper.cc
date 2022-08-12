@@ -1025,7 +1025,7 @@ void TsdfServer::_control_pipe_cb(__attribute__((unused)) int ch, char* string, 
 
         }
         
-        fprintf("x: %f, y: %f, z: %f",x,y,z);
+        printf("x: %f, y: %f, z: %f",x,y,z);
 
         goal_pose << x, y, z;
 
