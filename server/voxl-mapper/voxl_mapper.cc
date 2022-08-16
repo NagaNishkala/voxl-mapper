@@ -10,8 +10,6 @@
 #include <unordered_map>
 #include <mav_local_planner/conversions.h>
 #include <mav_trajectory_generation/trajectory_sampling.h>
-#include <string.h>
-#include <basic_string.h>
 
 
 #define PROCESS_NAME "voxl-mapper"
