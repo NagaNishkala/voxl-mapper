@@ -17,6 +17,7 @@ ModalAI is NOT responsible for any damages caused by flight path.
 you@home-pc:~$ voxl-docker -i voxl-cross
 ```
 2. Install build dependencies into docker environment
+
 For voxl-cam:
 ```
 ./install_build_deps.sh qrb5165 sdk-0.8
@@ -27,6 +28,7 @@ For voxl2:
 ```
 
 3. Run build script from the root of project
+
 For voxl-cam:
 ```
 ./build.sh qrb5165 sdk-0.8
